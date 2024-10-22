@@ -84,7 +84,7 @@ static uint32_t readBytes(FILE* fp, int count, int littleEndian) {
 static void readString(FILE* fp, char* str, uint32_t offset, uint32_t count, long currentPos) {
     long savedPos = ftell(fp);
     fseek(fp, offset, SEEK_SET);
-    fread(str, 1, count - 1, fp);  // -1 to ensure null termination
+    fread(str, 1, count - 1, fp);
     str[count - 1] = '\0';
     fseek(fp, savedPos, SEEK_SET);
 }
@@ -215,7 +215,6 @@ static TiffImage* readTIFF(const char* filename) {
 
     img->isValid = true;
 
-    // Read header
     uint16_t byteOrder = readBytes(fp, 2, 1);
     int littleEndian = (byteOrder == 0x4949);
 
@@ -286,7 +285,6 @@ static TiffImage* readTIFF(const char* filename) {
         dirIndex++;
     }
 
-    // Allocate and read image data
     if (img->isValid) {
         DirectoryInfo* firstDir = &img->directories[0];
         size_t sliceSize = firstDir->width * firstDir->height * (firstDir->bitsPerSample / 8);
@@ -297,7 +295,6 @@ static TiffImage* readTIFF(const char* filename) {
             img->isValid = false;
             snprintf(img->errorMsg, sizeof(img->errorMsg), "Memory allocation failed");
         } else {
-            // Read each directory's data
             for (int i = 0; i < img->depth && img->isValid; i++) {
                 DirectoryInfo* dir = &img->directories[i];
                 fseek(fp, dir->stripInfo.offset, SEEK_SET);
@@ -316,39 +313,12 @@ static TiffImage* readTIFF(const char* filename) {
     return img;
 }
 
-// Update free function
 static void freeTIFF(TiffImage* img) {
     if (img) {
         free(img->directories);
         free(img->data);
-        free(img);
     }
 }
-
-
-// Update helper functions to use directory info
-static uint16_t* getPixel16(const TiffImage* img, int x, int y, int z) {
-    if (!img || !img->isValid || !img->directories ||
-        x >= img->directories[0].width ||
-        y >= img->directories[0].height ||
-        z >= img->depth)
-        return NULL;
-
-    size_t sliceSize = img->directories[0].width * img->directories[0].height;
-    return &((uint16_t*)img->data)[z * sliceSize + y * img->directories[0].width + x];
-}
-
-static uint8_t* getPixel8(const TiffImage* img, int x, int y, int z) {
-    if (!img || !img->isValid || !img->directories ||
-        x >= img->directories[0].width ||
-        y >= img->directories[0].height ||
-        z >= img->depth)
-        return NULL;
-
-    size_t sliceSize = img->directories[0].width * img->directories[0].height;
-    return &((uint8_t*)img->data)[z * sliceSize + y * img->directories[0].width + x];
-}
-
 
 static const char* getCompressionName(uint16_t compression) {
     switch (compression) {

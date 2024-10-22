@@ -42,7 +42,7 @@ def load_and_plot_histogram(csv_path):
     plt.close()
 
 def main():
-    load_and_plot_histogram('cmake-build-release/slice_histogram.csv')
+    load_and_plot_histogram('../cmake-build-release/slice_histogram.csv')
 
 if __name__ == "__main__":
     main()

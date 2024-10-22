@@ -18,8 +18,6 @@
 //#include <curl/curl.h>
 //#include <blosc2.h>
 
-#include "minitiff.h"
-
 typedef uint8_t u8;
 typedef int8_t s8;
 typedef uint16_t u16;
@@ -30,6 +28,12 @@ typedef uint64_t u64;
 typedef int64_t s64;
 typedef float f32;
 typedef double f64;
+
+
+#include "minitiff.h"
+#include "mininrrd.h"
+#include "snic.h"
+
 
 static inline f32 maxf32(f32 a, f32 b) { return a > b ? a : b; }
 static inline f32 minf32(f32 a, f32 b) { return a < b ? a : b; }
@@ -55,7 +59,7 @@ static inline f32 avgf32(f32* data, s32 len) {
 //     - increasing Z means increasing through the slice. e.g. 1000.tif -> 1001.tif
 //     - increasing Y means looking farther down in a slice
 //     - increasing X means looking farther right in a slice
-//   - a 0 return code indicates success for functions that do NOT return a pointer
+//   - a 0 / SUCCESS return code indicates success for functions that do NOT return a pointer
 
 typedef enum errcode{
   SUCCESS = 0,
@@ -92,7 +96,21 @@ typedef struct {
   int index_count;
 } mesh;
 
+typedef struct histogram {
+  int num_bins;
+  f32 min_value;
+  f32 max_value;
+  f32 bin_width;
+  u32* bins;
+} histogram;
 
+typedef struct hist_stats {
+  f32 mean;
+  f32 median;
+  f32 mode;
+  u32 mode_count;
+  f32 std_dev;
+} hist_stats;
 
 static inline volume* volume_new(s32 dims[static 3], bool is_zarr, bool is_tif_stack, bool uses_3d_tif, bool local_storage) {
   assert (!(is_zarr && (is_tif_stack || uses_3d_tif)));
@@ -644,7 +662,6 @@ static void process_cube(chunk* chunk,
             cube_values[3], cube_values[7],
             (vertex){x, y + 1, z}, (vertex){x, y + 1, z + 1});
 
-    // Create triangles based on triTable
     for (int i = 0; triTable[cubeindex][i] != -1; i += 3) {
         out_mesh->vertices[out_mesh->vertex_count] = edge_verts[triTable[cubeindex][i]];
         out_mesh->vertices[out_mesh->vertex_count + 1] = edge_verts[triTable[cubeindex][i + 1]];
@@ -693,14 +710,13 @@ void mesh_free(mesh* mesh) {
         free(mesh->indices);
     }
 }
-// Write mesh to PLY file in ASCII format
+
 errcode write_mesh_to_ply(const char* filename, const mesh* mesh) {
   FILE* fp = fopen(filename, "w");
   if (!fp) {
     return FAIL;
   }
 
-  // Write PLY header
   fprintf(fp, "ply\n");
   fprintf(fp, "format ascii 1.0\n");
   fprintf(fp, "comment Created by marching cubes implementation\n");
@@ -712,7 +728,6 @@ errcode write_mesh_to_ply(const char* filename, const mesh* mesh) {
   fprintf(fp, "property list uchar int vertex_indices\n");
   fprintf(fp, "end_header\n");
 
-  // Write vertices
   for (int i = 0; i < mesh->vertex_count; i++) {
     fprintf(fp, "%.6f %.6f %.6f\n",
         mesh->vertices[i].x,
@@ -720,7 +735,6 @@ errcode write_mesh_to_ply(const char* filename, const mesh* mesh) {
         mesh->vertices[i].z);
   }
 
-  // Write faces
   for (int i = 0; i < mesh->index_count; i += 3) {
     fprintf(fp, "3 %d %d %d\n",
         mesh->indices[i],
@@ -858,15 +872,6 @@ static chunk unsharp_mask_3d(chunk* input, float amount, s32 kernel_size) {
 }
 */
 
-typedef struct histogram {
-    int num_bins;
-    f32 min_value;
-    f32 max_value;
-    f32 bin_width;
-    u32* bins;  // counts for each bin
-} histogram;
-
-// Create a new histogram with specified number of bins
 static histogram* histogram_new(int num_bins, f32 min_value, f32 max_value) {
     histogram* hist = malloc(sizeof(histogram));
     if (!hist) {
@@ -887,14 +892,12 @@ static histogram* histogram_new(int num_bins, f32 min_value, f32 max_value) {
     return hist;
 }
 
-// Free histogram memory
 static void histogram_free(histogram* hist) {
     if (hist) {
         free(hist->bins);
     }
 }
 
-// Get the bin index for a value
 static inline int get_bin_index(const histogram* hist, f32 value) {
     if (value <= hist->min_value) return 0;
     if (value >= hist->max_value) return hist->num_bins - 1;
@@ -904,13 +907,11 @@ static inline int get_bin_index(const histogram* hist, f32 value) {
     return bin;
 }
 
-// Create histogram from a slice
 static histogram* slice_histogram(const slice* slice, int num_bins) {
     if (!slice || num_bins <= 0) {
         return NULL;
     }
 
-    // First pass: find min and max values
     f32 min_val = FLT_MAX;
     f32 max_val = -FLT_MAX;
 
@@ -921,13 +922,11 @@ static histogram* slice_histogram(const slice* slice, int num_bins) {
         if (val > max_val) max_val = val;
     }
 
-    // Create histogram
     histogram* hist = histogram_new(num_bins, min_val, max_val);
     if (!hist) {
         return NULL;
     }
 
-    // Second pass: fill histogram
     for (int i = 0; i < total_pixels; i++) {
         int bin = get_bin_index(hist, slice->data[i]);
         hist->bins[bin]++;
@@ -936,13 +935,11 @@ static histogram* slice_histogram(const slice* slice, int num_bins) {
     return hist;
 }
 
-// Create histogram from a chunk
 static histogram* chunk_histogram(const chunk* chunk, int num_bins) {
     if (!chunk || num_bins <= 0) {
         return NULL;
     }
 
-    // First pass: find min and max values
     f32 min_val = FLT_MAX;
     f32 max_val = -FLT_MAX;
 
@@ -953,13 +950,11 @@ static histogram* chunk_histogram(const chunk* chunk, int num_bins) {
         if (val > max_val) max_val = val;
     }
 
-    // Create histogram
     histogram* hist = histogram_new(num_bins, min_val, max_val);
     if (!hist) {
         return NULL;
     }
 
-    // Second pass: fill histogram
     for (int i = 0; i < total_voxels; i++) {
         int bin = get_bin_index(hist, chunk->data[i]);
         hist->bins[bin]++;
@@ -968,17 +963,14 @@ static histogram* chunk_histogram(const chunk* chunk, int num_bins) {
     return hist;
 }
 
-// Write histogram to a CSV file
 static errcode write_histogram_to_csv(const histogram* hist, const char* filename) {
     FILE* fp = fopen(filename, "w");
     if (!fp) {
         return FAIL;
     }
 
-    // Write header
     fprintf(fp, "bin_start,bin_end,count\n");
 
-    // Write bins
     for (int i = 0; i < hist->num_bins; i++) {
         f32 bin_start = hist->min_value + i * hist->bin_width;
         f32 bin_end = bin_start + hist->bin_width;
@@ -989,21 +981,11 @@ static errcode write_histogram_to_csv(const histogram* hist, const char* filenam
     return SUCCESS;
 }
 
-// Get basic statistics from histogram
-typedef struct hist_stats {
-    f32 mean;
-    f32 median;
-    f32 mode;
-    u32 mode_count;
-    f32 std_dev;
-} hist_stats;
-
 static hist_stats calculate_histogram_stats(const histogram* hist) {
     hist_stats stats = {0};
 
-    // Calculate total count and weighted sum for mean
     u64 total_count = 0;
-    f64 weighted_sum = 0;  // Use double for accumulation
+    f64 weighted_sum = 0;
     u32 max_count = 0;
 
     for (int i = 0; i < hist->num_bins; i++) {
@@ -1020,7 +1002,6 @@ static hist_stats calculate_histogram_stats(const histogram* hist) {
 
     stats.mean = (f32)(weighted_sum / total_count);
 
-    // Calculate standard deviation
     f64 variance_sum = 0;
     for (int i = 0; i < hist->num_bins; i++) {
         f32 bin_center = hist->min_value + (i + 0.5f) * hist->bin_width;
@@ -1029,7 +1010,6 @@ static hist_stats calculate_histogram_stats(const histogram* hist) {
     }
     stats.std_dev = (f32)sqrt(variance_sum / total_count);
 
-    // Calculate median (approximate from histogram)
     u64 median_count = total_count / 2;
     u64 running_count = 0;
     for (int i = 0; i < hist->num_bins; i++) {

@@ -3,11 +3,11 @@
 
 int main(int argc, char** argv) {
   printf("Hello World\n");
-
-  chunk* mychunk = tiff_to_chunk("../example_3d.tif");
+#if 0
+  chunk* mychunk = tiff_to_chunk("../example_data/example_3d.tif");
   printf("%f\n",mychunk->data[0]);
 
-  slice* myslice = tiff_to_slice("../example_3d.tif", 0);
+  slice* myslice = tiff_to_slice("../example_data/example_3d.tif", 0);
   printf("%f\n",myslice->data[0]);
 
   printf("%f\n",slice_at(myslice, 0, 0));
@@ -41,7 +41,24 @@ int main(int argc, char** argv) {
 
   histogram_free(slice_hist);
   histogram_free(chunk_hist);
+#endif
+  nrrd_t* nrrd = nrrd_read("../example_data/example_volume_raw.nrrd");
+  if (!nrrd) {
+    printf("Failed to read NRRD file\n");
+    return 1;
+  }
 
+  printf("Dimensions: %d\n", nrrd->dimension);
+  printf("Type: %s\n", nrrd->type);
+  printf("Size: ");
+  for (int i = 0; i < nrrd->dimension; i++) {
+    printf("%d ", nrrd->sizes[i]);
+  }
+  printf("\n");
 
+  uint16_t* data = (uint16_t*)nrrd->data;
+  nrrd_free(nrrd);
+
+  return 0;
 }
 

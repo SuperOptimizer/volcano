@@ -121,6 +121,8 @@ static inline chunk* chunk_new(s32 dims[static 3]) {
   return ret;
 }
 
+static inline void chunk_free(chunk* chunk) {}
+
 static inline errcode chunk_fill(chunk* chunk, volume* vol, s32 start[static 3]) {
   if(start[0] + chunk->dims[0] < 0 || start[0] + chunk->dims[0] > vol->dims[0]) {
     assert(false);
@@ -685,11 +687,10 @@ mesh* march(chunk* chunk, f32 isovalue) {
     return out_mesh;
 }
 
-void free_mesh(mesh* mesh) {
+void mesh_free(mesh* mesh) {
     if (mesh) {
         free(mesh->vertices);
         free(mesh->indices);
-        free(mesh);
     }
 }
 // Write mesh to PLY file in ASCII format
@@ -856,3 +857,188 @@ static chunk unsharp_mask_3d(chunk* input, float amount, s32 kernel_size) {
   return output;
 }
 */
+
+typedef struct histogram {
+    int num_bins;
+    f32 min_value;
+    f32 max_value;
+    f32 bin_width;
+    u32* bins;  // counts for each bin
+} histogram;
+
+// Create a new histogram with specified number of bins
+static histogram* histogram_new(int num_bins, f32 min_value, f32 max_value) {
+    histogram* hist = malloc(sizeof(histogram));
+    if (!hist) {
+        return NULL;
+    }
+
+    hist->bins = calloc(num_bins, sizeof(u32));
+    if (!hist->bins) {
+        free(hist);
+        return NULL;
+    }
+
+    hist->num_bins = num_bins;
+    hist->min_value = min_value;
+    hist->max_value = max_value;
+    hist->bin_width = (max_value - min_value) / num_bins;
+
+    return hist;
+}
+
+// Free histogram memory
+static void histogram_free(histogram* hist) {
+    if (hist) {
+        free(hist->bins);
+    }
+}
+
+// Get the bin index for a value
+static inline int get_bin_index(const histogram* hist, f32 value) {
+    if (value <= hist->min_value) return 0;
+    if (value >= hist->max_value) return hist->num_bins - 1;
+
+    int bin = (int)((value - hist->min_value) / hist->bin_width);
+    if (bin >= hist->num_bins) bin = hist->num_bins - 1;
+    return bin;
+}
+
+// Create histogram from a slice
+static histogram* slice_histogram(const slice* slice, int num_bins) {
+    if (!slice || num_bins <= 0) {
+        return NULL;
+    }
+
+    // First pass: find min and max values
+    f32 min_val = FLT_MAX;
+    f32 max_val = -FLT_MAX;
+
+    int total_pixels = slice->dims[0] * slice->dims[1];
+    for (int i = 0; i < total_pixels; i++) {
+        f32 val = slice->data[i];
+        if (val < min_val) min_val = val;
+        if (val > max_val) max_val = val;
+    }
+
+    // Create histogram
+    histogram* hist = histogram_new(num_bins, min_val, max_val);
+    if (!hist) {
+        return NULL;
+    }
+
+    // Second pass: fill histogram
+    for (int i = 0; i < total_pixels; i++) {
+        int bin = get_bin_index(hist, slice->data[i]);
+        hist->bins[bin]++;
+    }
+
+    return hist;
+}
+
+// Create histogram from a chunk
+static histogram* chunk_histogram(const chunk* chunk, int num_bins) {
+    if (!chunk || num_bins <= 0) {
+        return NULL;
+    }
+
+    // First pass: find min and max values
+    f32 min_val = FLT_MAX;
+    f32 max_val = -FLT_MAX;
+
+    int total_voxels = chunk->dims[0] * chunk->dims[1] * chunk->dims[2];
+    for (int i = 0; i < total_voxels; i++) {
+        f32 val = chunk->data[i];
+        if (val < min_val) min_val = val;
+        if (val > max_val) max_val = val;
+    }
+
+    // Create histogram
+    histogram* hist = histogram_new(num_bins, min_val, max_val);
+    if (!hist) {
+        return NULL;
+    }
+
+    // Second pass: fill histogram
+    for (int i = 0; i < total_voxels; i++) {
+        int bin = get_bin_index(hist, chunk->data[i]);
+        hist->bins[bin]++;
+    }
+
+    return hist;
+}
+
+// Write histogram to a CSV file
+static errcode write_histogram_to_csv(const histogram* hist, const char* filename) {
+    FILE* fp = fopen(filename, "w");
+    if (!fp) {
+        return FAIL;
+    }
+
+    // Write header
+    fprintf(fp, "bin_start,bin_end,count\n");
+
+    // Write bins
+    for (int i = 0; i < hist->num_bins; i++) {
+        f32 bin_start = hist->min_value + i * hist->bin_width;
+        f32 bin_end = bin_start + hist->bin_width;
+        fprintf(fp, "%.6f,%.6f,%u\n", bin_start, bin_end, hist->bins[i]);
+    }
+
+    fclose(fp);
+    return SUCCESS;
+}
+
+// Get basic statistics from histogram
+typedef struct hist_stats {
+    f32 mean;
+    f32 median;
+    f32 mode;
+    u32 mode_count;
+    f32 std_dev;
+} hist_stats;
+
+static hist_stats calculate_histogram_stats(const histogram* hist) {
+    hist_stats stats = {0};
+
+    // Calculate total count and weighted sum for mean
+    u64 total_count = 0;
+    f64 weighted_sum = 0;  // Use double for accumulation
+    u32 max_count = 0;
+
+    for (int i = 0; i < hist->num_bins; i++) {
+        f32 bin_center = hist->min_value + (i + 0.5f) * hist->bin_width;
+        weighted_sum += bin_center * hist->bins[i];
+        total_count += hist->bins[i];
+
+        if (hist->bins[i] > max_count) {
+            max_count = hist->bins[i];
+            stats.mode = bin_center;
+            stats.mode_count = hist->bins[i];
+        }
+    }
+
+    stats.mean = (f32)(weighted_sum / total_count);
+
+    // Calculate standard deviation
+    f64 variance_sum = 0;
+    for (int i = 0; i < hist->num_bins; i++) {
+        f32 bin_center = hist->min_value + (i + 0.5f) * hist->bin_width;
+        f32 diff = bin_center - stats.mean;
+        variance_sum += diff * diff * hist->bins[i];
+    }
+    stats.std_dev = (f32)sqrt(variance_sum / total_count);
+
+    // Calculate median (approximate from histogram)
+    u64 median_count = total_count / 2;
+    u64 running_count = 0;
+    for (int i = 0; i < hist->num_bins; i++) {
+        running_count += hist->bins[i];
+        if (running_count >= median_count) {
+            stats.median = hist->min_value + (i + 0.5f) * hist->bin_width;
+            break;
+        }
+    }
+
+    return stats;
+}

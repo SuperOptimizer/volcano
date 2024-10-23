@@ -4,3 +4,15 @@
 [submodule "third-party/miniz"]
 	path = third-party/miniz
 	url = https://github.com/richgel999/miniz.git
+[submodule "third-party/imgui-vtk"]
+	path = third-party/imgui-vtk
+	url = https://github.com/trlsmax/imgui-vtk.git
+[submodule "third-party/imgui"]
+	path = third-party/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "third-party/gl3w"]
+	path = third-party/gl3w
+	url = https://github.com/skaslev/gl3w.git
+[submodule "third-party/glfw"]
+	path = third-party/glfw
+	url = https://github.com/glfw/glfw.git

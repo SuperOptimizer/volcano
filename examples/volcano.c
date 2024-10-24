@@ -1,9 +1,9 @@
-#include "volcano.h"
+#include "../volcano.h"
 
 
 int main(int argc, char** argv) {
   printf("Hello World\n");
-#if 0
+
   chunk* mychunk = tiff_to_chunk("../example_data/example_3d.tif");
   printf("%f\n",mychunk->data[0]);
 
@@ -14,6 +14,10 @@ int main(int argc, char** argv) {
   printf("%f\n",chunk_at(mychunk, 0, 0, 0));
 
   chunk* smallchunk = avgpool(mychunk,4,4);
+  chunk* labels;
+  Superpixel* superpixels;
+  easy_snic(smallchunk,4,10.0f,&labels,&superpixels);
+
 
   mesh* mymesh = march(smallchunk, 32768.0f);
   write_mesh_to_ply("out.ply",mymesh);
@@ -41,7 +45,7 @@ int main(int argc, char** argv) {
 
   histogram_free(slice_hist);
   histogram_free(chunk_hist);
-#endif
+
   nrrd_t* nrrd = nrrd_read("../example_data/example_volume_raw.nrrd");
   if (!nrrd) {
     printf("Failed to read NRRD file\n");

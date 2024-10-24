@@ -5,9 +5,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
-#include <zlib.h>
+//#include <zlib.h>
 
-//#include "miniz.h"
+#include "miniz.h"
 
 #define MAX_LINE_LENGTH 1024
 #define MAX_HEADER_LINES 100

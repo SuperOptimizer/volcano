@@ -156,31 +156,31 @@ static int snic_superpixel_count(int lx, int ly, int lz, int d_seed)  {
 }
 
 // The labels must be the same size as img, and all zeros.
-static int snic(f32 *img, int lx, int ly, int lz, int d_seed, f32 compactness, f32 lowmid, f32 midhig, u32 *labels, Superpixel* superpixels) {
+static int snic(f32 *img, int lz, int ly, int lx, int d_seed, f32 compactness, f32 lowmid, f32 midhig, u32 *labels, Superpixel* superpixels) {
   int neigh_overflow = 0; // Number of neighbors that couldn't be added.
   int lylx = ly * lx;
   int img_size = lylx * lz;
-  #define idx(y, x, z) ((z)*lylx + (x)*ly + (y))
+  #define idx(z, y, x) ((z)*lylx + (x)*ly + (y))
   #define sqr(x) ((x)*(x))
 
   // Initialize priority queue with seeds on a grid with step d_seed.
   Heap pq = heap_alloc(img_size*16);
   u32 numk = 0;
   for (u16 iz = d_seed/2; iz < lz; iz += d_seed) {
-    for (u16 ix = d_seed/2; ix < lx; ix += d_seed) {
-      for (u16 iy = d_seed/2; iy < ly; iy += d_seed) {
+    for (u16 iy = d_seed/2; iy < ly; iy += d_seed) {
+      for (u16 ix = d_seed/2; ix < lx; ix += d_seed) {
         numk++;
         // Move seeds away from edges. Not essential but should improve results.
         u16 x = ix, y = iy, z = iz;
         f32 grad = INFINITY;
         for (u16 dz = -1; dz <= 1; dz++) {
-          for (u16 dx = -1; dx <= 1; dx++) {
-            for (u16 dy = -1; dy <= 1; dy++) {
+          for (u16 dy = -1; dy <= 1; dy++) {
+            for (u16 dx = -1; dx <= 1; dx++) {
               u16 jx = ix+dx, jy = iy+dy, jz = iz+dz;
               if (0 < jx && jx < lx-1 && 0 < jy && jy < ly-1 && 0 < jz && jz < lz-1) {
-                f32 gy = img[idx(jy+1,jx,jz)] - img[idx(jy-1,jx,jz)];
-                f32 gx = img[idx(jy,jx+1,jz)] - img[idx(jy,jx-1,jz)];
-                f32 gz = img[idx(jy,jx,jz+1)] - img[idx(jy,jx,jz-1)];
+                f32 gy = img[idx(jz,jy+1,jx)] - img[idx(jz,jy-1,jx)];
+                f32 gx = img[idx(jz,jy,jx+1)] - img[idx(jz,jy,jx-1)];
+                f32 gz = img[idx(jz+1,jy,jx)] - img[idx(jz-1,jy,jx)];
                 f32 jgrad = sqr(gx)+sqr(gy)+sqr(gz);
                 if (jgrad < grad) {
                   x = jx; y = jy; z = jz;
@@ -203,7 +203,7 @@ static int snic(f32 *img, int lx, int ly, int lz, int d_seed, f32 compactness, f
 
   while (pq.len > 0) {
     HeapNode n = heap_pop(&pq);
-    int i = idx(n.y, n.x, n.z);
+    int i = idx(n.z, n.y, n.x);
     if (labels[i] > 0) continue;
 
     u32 k = n.k;
@@ -217,7 +217,7 @@ static int snic(f32 *img, int lx, int ly, int lz, int d_seed, f32 compactness, f
     else if (img[i] <= midhig) superpixels[k].nmid += 1;
     else                       superpixels[k].nhig += 1;
 
-    #define do_neigh(ndy, ndx, ndz, ioffset) { \
+    #define do_neigh(ndz, ndy, ndx, ioffset) { \
       int xx = n.x + ndx; int yy = n.y + ndy; int zz = n.z + ndz; \
       if (0 <= xx && xx < lx && 0 <= yy && yy < ly && 0 <= zz && zz < lz) { \
         int ii = i + ioffset; \
@@ -237,12 +237,12 @@ static int snic(f32 *img, int lx, int ly, int lz, int d_seed, f32 compactness, f
       } \
     }
 
-    do_neigh( 1,  0,  0,  1);
-    do_neigh(-1,  0,  0, -1);
-    do_neigh( 0,  1,  0,  ly);
-    do_neigh( 0, -1,  0, -ly);
-    do_neigh( 0,  0,  1,  lylx);
-    do_neigh( 0,  0, -1, -lylx);
+    do_neigh( 0,  1,  0,    1);
+    do_neigh( 0, -1,  0,   -1);
+    do_neigh( 0,  0,  1,    ly);
+    do_neigh( 0,  0, -1,   -ly);
+    do_neigh( 1,  0,  0,  lylx);
+    do_neigh(-1,  0,  0, -lylx);
     #undef do_neigh
   }
 
@@ -259,3 +259,4 @@ static int snic(f32 *img, int lx, int ly, int lz, int d_seed, f32 compactness, f
   heap_free(&pq);
   return neigh_overflow;
 }
+

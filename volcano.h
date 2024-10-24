@@ -1022,3 +1022,15 @@ static hist_stats calculate_histogram_stats(const histogram* hist) {
 
     return stats;
 }
+
+static int easy_snic(chunk* mychunk, s32 density, f32 compactness, chunk** labelsout, Superpixel** superpixelsout) {
+  s32 lz,ly,lx;
+  lz = mychunk->dims[0];
+  ly = mychunk->dims[1];
+  lx = mychunk->dims[2];
+
+  *labelsout = chunk_new(mychunk->dims);
+  s32 superpixels_count = snic_superpixel_count(lx,ly,lz,density);
+  *superpixelsout = calloc(superpixels_count,sizeof(Superpixel));
+  return snic(mychunk->data,lx,ly,lz,density,compactness,80.0f,160.0f,(*labelsout)->data,*superpixelsout);
+}

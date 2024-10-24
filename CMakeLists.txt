@@ -19,13 +19,12 @@ endif()
 include_directories(. third-party/)
 
 add_executable(volcanotest
-    volcano.c
+    examples/volcano.c
     volcano.h
     third-party/minitiff.h
     third-party/snic.h
     third-party/mininrrd.h
-    #third-party/miniz.c
-    #third-party/miniz.h
+    third-party/miniz.h
     )
 
 

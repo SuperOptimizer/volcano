@@ -16,3 +16,6 @@
 [submodule "third-party/glfw"]
 	path = third-party/glfw
 	url = https://github.com/glfw/glfw.git
+[submodule "third-party/json.h"]
+	path = third-party/json.h
+	url = https://github.com/sheredom/json.h.git

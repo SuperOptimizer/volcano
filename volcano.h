@@ -14,9 +14,11 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <math.h>
+#include <getopt.h>
 
 //#include <curl/curl.h>
 //#include <blosc2.h>
+#include "json.h/json.h"
 
 typedef uint8_t u8;
 typedef int8_t s8;
@@ -33,6 +35,7 @@ typedef double f64;
 #include "minitiff.h"
 #include "mininrrd.h"
 #include "snic.h"
+
 
 
 static inline f32 maxf32(f32 a, f32 b) { return a > b ? a : b; }
@@ -1033,4 +1036,185 @@ static int easy_snic(chunk* mychunk, s32 density, f32 compactness, chunk** label
   s32 superpixels_count = snic_superpixel_count(lx,ly,lz,density);
   *superpixelsout = calloc(superpixels_count,sizeof(Superpixel));
   return snic(mychunk->data,lx,ly,lz,density,compactness,80.0f,160.0f,(*labelsout)->data,*superpixelsout);
+}
+
+
+
+// Structure to hold compressor settings
+typedef struct zarr_compressor_settings {
+    int32_t blocksize;
+    int32_t clevel;
+    char cname[32];
+    char id[32];
+    int32_t shuffle;
+}zarr_compressor_settings ;
+
+// Structure to hold all zarr metadata
+typedef struct zarr_metadata {
+    int32_t shape[3];
+    int32_t chunks[3];
+    zarr_compressor_settings compressor;
+    char dtype[8];
+    int32_t fill_value;
+    char order;  // Single character 'C' or 'F'
+    int32_t zarr_format;
+} zarr_metadata;
+
+static struct json_value_s* find_value(const struct json_object_s* obj, const char* key) {
+    struct json_object_element_s* element = obj->start;
+    while (element) {
+        if (element->name->string_size == strlen(key) &&
+            strncmp(element->name->string, key, element->name->string_size) == 0) {
+            return element->value;
+        }
+        element = element->next;
+    }
+    return NULL;
+}
+
+static void parse_int32_array(struct json_array_s* array, int32_t output[3]) {
+    struct json_array_element_s* element = array->start;
+    for (int i = 0; i < 3 && element; i++) {
+        struct json_number_s* num = element->value->payload;
+        output[i] = (int32_t)strtol(num->number, NULL, 10);
+        element = element->next;
+    }
+}
+
+static int parse_zarr_metadata(const char* json_string, zarr_metadata* metadata) {
+    // Parse the JSON
+    struct json_value_s* root = json_parse(json_string, strlen(json_string));
+    if (!root) {
+        printf("Failed to parse JSON!\n");
+        return 0;
+    }
+
+    // The root is an object
+    struct json_object_s* object = (struct json_object_s*)root->payload;
+
+    // Parse shape
+    struct json_value_s* shapes_value = find_value(object, "shape");
+    if (shapes_value && shapes_value->type == json_type_array) {
+        parse_int32_array((struct json_array_s*)shapes_value->payload, metadata->shape);
+    }
+
+    // Parse chunks
+    struct json_value_s* chunks_value = find_value(object, "chunks");
+    if (chunks_value && chunks_value->type == json_type_array) {
+        parse_int32_array((struct json_array_s*)chunks_value->payload, metadata->chunks);
+    }
+
+    // Parse compressor settings
+    struct json_value_s* compressor_value = find_value(object, "compressor");
+    if (compressor_value && compressor_value->type == json_type_object) {
+        struct json_object_s* compressor = (struct json_object_s*)compressor_value->payload;
+
+        // Get blocksize
+        struct json_value_s* blocksize = find_value(compressor, "blocksize");
+        if (blocksize && blocksize->type == json_type_number) {
+            struct json_number_s* num = (struct json_number_s*)blocksize->payload;
+            metadata->compressor.blocksize = (int32_t)strtol(num->number, NULL, 10);
+        }
+
+        // Get clevel
+        struct json_value_s* clevel = find_value(compressor, "clevel");
+        if (clevel && clevel->type == json_type_number) {
+            struct json_number_s* num = (struct json_number_s*)clevel->payload;
+            metadata->compressor.clevel = (int32_t)strtol(num->number, NULL, 10);
+        }
+
+        // Get cname
+        struct json_value_s* cname = find_value(compressor, "cname");
+        if (cname && cname->type == json_type_string) {
+            struct json_string_s* str = (struct json_string_s*)cname->payload;
+            strncpy(metadata->compressor.cname, str->string, sizeof(metadata->compressor.cname) - 1);
+        }
+
+        // Get id
+        struct json_value_s* id = find_value(compressor, "id");
+        if (id && id->type == json_type_string) {
+            struct json_string_s* str = (struct json_string_s*)id->payload;
+            strncpy(metadata->compressor.id, str->string, sizeof(metadata->compressor.id) - 1);
+        }
+
+        // Get shuffle
+        struct json_value_s* shuffle = find_value(compressor, "shuffle");
+        if (shuffle && shuffle->type == json_type_number) {
+            struct json_number_s* num = (struct json_number_s*)shuffle->payload;
+            metadata->compressor.shuffle = (int32_t)strtol(num->number, NULL, 10);
+        }
+    }
+
+    // Parse dtype
+    struct json_value_s* dtype_value = find_value(object, "dtype");
+    if (dtype_value && dtype_value->type == json_type_string) {
+        struct json_string_s* str = (struct json_string_s*)dtype_value->payload;
+        strncpy(metadata->dtype, str->string, sizeof(metadata->dtype) - 1);
+    }
+
+    // Parse fill_value
+    struct json_value_s* fill_value = find_value(object, "fill_value");
+    if (fill_value && fill_value->type == json_type_number) {
+        struct json_number_s* num = (struct json_number_s*)fill_value->payload;
+        metadata->fill_value = (int32_t)strtol(num->number, NULL, 10);
+    }
+
+    // Parse order
+    struct json_value_s* order_value = find_value(object, "order");
+    if (order_value && order_value->type == json_type_string) {
+        struct json_string_s* str = (struct json_string_s*)order_value->payload;
+        metadata->order = str->string[0];
+    }
+
+    // Parse zarr_format
+    struct json_value_s* format_value = find_value(object, "zarr_format");
+    if (format_value && format_value->type == json_type_number) {
+        struct json_number_s* num = (struct json_number_s*)format_value->payload;
+        metadata->zarr_format = (int32_t)strtol(num->number, NULL, 10);
+    }
+
+    // Free the parsed JSON
+    free(root);
+
+    return 1;
+}
+
+
+static zarr_metadata  parse_zarray(char* path) {
+  zarr_metadata metadata = {0};  // Initialize to zeros
+
+  FILE* fp = fopen(path, "rt");
+  if (fp == NULL) {
+    printf("could not open file %s\n", path);
+    assert(false);
+    return metadata;
+  }
+  s32 size;
+  fseek(fp, 0, SEEK_END);
+  size = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  char* buf = calloc(size+1,1);
+  fread(buf,1,size,fp);
+
+
+  if (parse_zarr_metadata(buf, &metadata)) {
+    // Print parsed values to verify
+    printf("Shape: [%d, %d, %d]\n",
+           metadata.shape[0], metadata.shape[1], metadata.shape[2]);
+    printf("Chunks: [%d, %d, %d]\n",
+           metadata.chunks[0], metadata.chunks[1], metadata.chunks[2]);
+    printf("Compressor:\n");
+    printf("  blocksize: %d\n", metadata.compressor.blocksize);
+    printf("  clevel: %d\n", metadata.compressor.clevel);
+    printf("  cname: %s\n", metadata.compressor.cname);
+    printf("  id: %s\n", metadata.compressor.id);
+    printf("  shuffle: %d\n", metadata.compressor.shuffle);
+    printf("dtype: %s\n", metadata.dtype);
+    printf("fill_value: %d\n", metadata.fill_value);
+    printf("order: %c\n", metadata.order);
+    printf("zarr_format: %d\n", metadata.zarr_format);
+  }
+
+  free(buf);
+  return metadata;
 }

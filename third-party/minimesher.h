@@ -14,7 +14,6 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <math.h>
-#include <getopt.h>
 
 static const int edgeTable[256]={
 0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
@@ -508,45 +507,4 @@ static inline int march_cubes(const float* values,      // Input 3D array of val
     *out_index_count = index_count;
 
     return 1;
-}
-
-// Example usage:
-void example() {
-    // Create a simple 4x4x4 grid of values
-    int dimx = 4, dimy = 4, dimz = 4;
-    float* values = malloc(dimx * dimy * dimz * sizeof(float));
-
-    // Fill with some test values (e.g., a sphere)
-    for (int z = 0; z < dimz; z++) {
-        for (int y = 0; y < dimy; y++) {
-            for (int x = 0; x < dimx; x++) {
-                float dx = x - dimx/2.0f + 0.5f;
-                float dy = y - dimy/2.0f + 0.5f;
-                float dz = z - dimz/2.0f + 0.5f;
-                values[z*(dimx*dimy) + y*dimx + x] = dx*dx + dy*dy + dz*dz;
-            }
-        }
-    }
-
-    // Output arrays
-    float* vertices;
-    int* indices;
-    int vertex_count;
-    int index_count;
-
-    // Run marching cubes
-    if (march_cubes(values, dimx, dimy, dimz, 2.0f,
-                   &vertices, &indices,
-                   &vertex_count, &index_count)) {
-
-        // Use the mesh data...
-        printf("Generated mesh with %d vertices and %d indices\n",
-               vertex_count, index_count);
-
-        // Clean up
-        free(vertices);
-        free(indices);
-    }
-
-    free(values);
 }

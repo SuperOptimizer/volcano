@@ -53,8 +53,8 @@ static void skip_line(FILE *fp) {
 }
 
 static inline int read_mesh_from_ply(const char *filename,
-                                     float **out_vertices, // Will be allocated
-                                     int **out_indices, // Will be allocated
+                                     float **out_vertices,
+                                     int **out_indices,
                                      int *out_vertex_count,
                                      int *out_index_count) {
   FILE *fp = fopen(filename, "r");
@@ -62,14 +62,12 @@ static inline int read_mesh_from_ply(const char *filename,
     return 1;
   }
 
-  // Check PLY header
   char buffer[1024];
   if (!fgets(buffer, sizeof(buffer), fp) || strncmp(buffer, "ply", 3) != 0) {
     fclose(fp);
     return 1;
   }
 
-  // Parse header
   int vertex_count = 0;
   int face_count = 0;
   int in_header = 1;
@@ -93,9 +91,8 @@ static inline int read_mesh_from_ply(const char *filename,
     return 1;
   }
 
-  // Allocate arrays
   float *vertices = malloc(vertex_count * 3 * sizeof(float));
-  int *indices = malloc(face_count * 3 * sizeof(int)); // Assuming triangles
+  int *indices = malloc(face_count * 3 * sizeof(int));
 
   if (!vertices || !indices) {
     free(vertices);

@@ -43,6 +43,7 @@ static inline chunk *chunk_new(int dims[static 3]) {
 }
 
 static inline void chunk_free(chunk *chunk) {
+  free(chunk);
 }
 
 
@@ -59,6 +60,10 @@ static inline slice *slice_new(int dims[static 2]) {
     ret->dims[i] = dims[i];
   }
   return ret;
+}
+
+static inline void slice_free(slice *slice) {
+  free(slice);
 }
 
 static inline f32 slice_at(slice *slice, s32 y, s32 x) {

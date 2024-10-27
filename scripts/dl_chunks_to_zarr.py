@@ -12,7 +12,7 @@ import io
 import tifffile
 import cv2
 from PIL import Image
-
+import multiprocessing
 CACHEDIR='.'
 
 @jit(nopython=True)
@@ -108,34 +108,37 @@ def global_local_contrast_3d(x):
     return rescale_array(y.astype(np.float32))
 
 
+def process_subcube(data_chunk, mask_chunk, subcube_coords):
+    """Process a 250x250x250 chunk of data"""
+    # Process the subcube
+    #data = skimage.restoration.denoise_tv_chambolle(data_chunk, weight=.10)
+    data = skimage.filters.gaussian(data_chunk, sigma=1)
+    data = unsharp_mask(data, radius=4.0, amount=1.0)
+    data = global_local_contrast_3d(data)
+    data = skimage.exposure.equalize_adapthist(data, nbins=16)
+    data = data.astype(np.float32)
+    data = rescale_array(data)
+    data *= 255.
+    data = data.astype(np.uint8)
+    data[mask_chunk] = 0
+    data = np.transpose(data, (2, 0, 1))
+    return data & 0xf0, subcube_coords
 
 
 def download(url):
   path = url.replace("https://", "")
-  path = os.path.join(CACHEDIR,path)
-  if not os.path.exists(path):
-    print(f"downloading {url}")
-    response = requests.get(url)
-    if response.status_code == 200:
-      os.makedirs(os.path.dirname(path), exist_ok=True)
-      with io.BytesIO(response.content) as filedata, tifffile.TiffFile(filedata) as tif:
-        data = (tif.asarray() >> 8).astype(np.uint8) & 0xf0
-        tifffile.imwrite(path, data)
-    else:
-      raise Exception(f'Cannot download {url}')
+  print(f"downloading {url}")
+  response = requests.get(url)
+  if response.status_code == 200:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with io.BytesIO(response.content) as filedata, tifffile.TiffFile(filedata) as tif:
+      data =tif.asarray()
   else:
-    print(f"getting {path} from cache")
+    raise Exception(f'Cannot download {url}')
 
-  if url.endswith('.tif'):
-      tif = tifffile.imread(path)
-      data = tif
-      if data.dtype == np.uint16:
-        return ((data >> 8) & 0xf0).astype(np.uint8)
-      else:
-        return data
-  elif url.endswith('.jpg') or url.endswith('.png'):
-    data = np.asarray(Image.open(path))
-    return data & 0xf0
+  return (data >> 8).astype(np.uint8)
+
+
 
 class ZVol:
   def __init__(self, basepath, create=False, writeable=False):
@@ -157,30 +160,63 @@ class ZVol:
       self.root = zarr.open(f"{basepath}/volcano.zvol", mode="r+" if writeable else "r")
 
   def download_all(self):
-    for y in range(1, 17):
-      for x in range(1, 18):
-        for z in range(1, 30):
-          if self.root['20230205180739_downloaded'][z,y,x] == 1:
-            print(f"skipping {z} {y} {x}")
-            continue
-          data = download(
-            f"https://dl.ash2txt.org/full-scrolls/Scroll1/PHercParis4.volpkg/volume_grids/20230205180739/cell_yxz_{y:03}_{x:03}_{z:03}.tif")
-          mask = data == 0
-          data = skimage.restoration.denoise_tv_chambolle(data, weight=.10)
-          data = skimage.filters.gaussian(data, sigma=2)
-          data = unsharp_mask(data, radius=4.0, amount=2.0)
-          data = global_local_contrast_3d(data)
-          data = skimage.exposure.equalize_adapthist(data, nbins=16)
-          data = data.astype(np.float32)
-          data = rescale_array(data)
-          data *= 255.
-          data = data.astype(np.uint8)
-          data[mask] = 0
-          data = np.transpose(data, (2, 0, 1))
+      with multiprocessing.Pool(processes=8) as pool:
+          for y in range(1, 16):
+              for x in range(1, 17):
+                  for z in range(1, 29):
+                      if self.root['20230205180739_downloaded'][z-1, y-1, x-1] == 1:
+                          print(f"skipping {z} {y} {x}")
+                          continue
 
-          self.root['20230205180739'][z, :, :] = data & 0xf0
-          self.root['20230205180739_downloaded'][z,y,x] = 1
+                      # Download the full cube
+                      data = download(
+                          f"https://dl.ash2txt.org/full-scrolls/Scroll1/PHercParis4.volpkg/volume_grids/20230205180739/cell_yxz_{y:03}_{x:03}_{z:03}.tif")
+                      mask = data == 0
 
+                      # Create tasks for subcubes
+                      tasks = []
+                      subcube_size = 250
+                      for sz in range(0, 500, subcube_size):
+                          for sy in range(0, 500, subcube_size):
+                              for sx in range(0, 500, subcube_size):
+                                  # Extract subcube and corresponding mask
+                                  data_chunk = data[sz:sz + subcube_size,
+                                               sy:sy + subcube_size,
+                                               sx:sx + subcube_size].copy()
+                                  mask_chunk = mask[sz:sz + subcube_size,
+                                               sy:sy + subcube_size,
+                                               sx:sx + subcube_size].copy()
+
+                                  # Calculate global coordinates for this subcube
+                                  global_z = z * 500 - 500 + sz
+                                  global_y = y * 500 - 500 + sy
+                                  global_x = x * 500 - 500 + sx
+
+                                  tasks.append((
+                                      data_chunk,
+                                      mask_chunk,
+                                      (global_z, global_y, global_x)
+                                  ))
+
+                      # Free original data and mask
+                      del data
+                      del mask
+
+                      # Process subcubes in parallel and write immediately
+                      for processed_data, (global_z, global_y, global_x) in pool.starmap(process_subcube, tasks):
+                          # Write subcube to zarr array
+                          self.root['20230205180739'][
+                          global_z:global_z + subcube_size,
+                          global_y:global_y + subcube_size,
+                          global_x:global_x + subcube_size
+                          ] = processed_data
+
+                          # Free processed data immediately
+                          del processed_data
+
+                      # Mark as downloaded after all subcubes are written
+                      self.root['20230205180739_downloaded'][z-1, y-1, x-1] = 1
+                      print(f"Completed cube {z},{y},{x}")
 
   def chunk(self, volume, start, size):
     if start[0] + size[0] < 0 or start[0] + size[0] >= self.root[volume].shape[0]:
@@ -195,6 +231,6 @@ class ZVol:
 
 
 if __name__ == '__main__':
-  zvol = ZVol('d:/', create=False,writeable=True)
+  zvol = ZVol('e:/', create=False,writeable=True)
   zvol.download_all()
   #zvol.chunk('20230205180739',(1024,1024,1024),(128,128,128))

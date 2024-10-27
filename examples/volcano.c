@@ -226,18 +226,18 @@ int main(int argc, char** argv) {
   easy_snic(smallchunk, 4, 10.0f, &labels, &superpixels);
 
 
-  mesh* mymesh = march(smallchunk, 32768.0f);
-  write_mesh_to_ply("out.ply", mymesh);
+  //mesh* mymesh = march(smallchunk, 32768.0f);
+  //write_mesh_to_ply("out.ply", mymesh);
 
 
-  mesh_free(mymesh);
-  free(mymesh);
-  mymesh = NULL;
+  //mesh_free(mymesh);
+  //free(mymesh);
+  //mymesh = NULL;
 
   chunk_free(smallchunk);
   free(smallchunk);
   smallchunk = NULL;
-
+/*
   histogram* slice_hist = slice_histogram(myslice, 256);
   histogram* chunk_hist = chunk_histogram(mychunk, 256);
 
@@ -252,7 +252,7 @@ int main(int argc, char** argv) {
 
   histogram_free(slice_hist);
   histogram_free(chunk_hist);
-
+*/
   nrrd_t* nrrd = nrrd_read("../example_data/example_volume_raw.nrrd");
   if (!nrrd) {
     printf("Failed to read NRRD file\n");

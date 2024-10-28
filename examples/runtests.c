@@ -1,8 +1,16 @@
 #include "../volcano.h"
 
+void testcurl() {
+  char* buf;
+  long len = download("https://dl.ash2txt.org/full-scrolls/Scroll1/PHercParis4.volpkg/paths/20230503225234/author.txt", &buf);
+  assert(len == 6);
+  assert(strncmp(buf,"noemi",5) == 0);
+  printf("%d\n",(int) len);
+}
 
 
 int main(int argc, char** argv) {
+  testcurl();
 
   zarr_metadata metadata = parse_zarray("D:\\vesuvius.zarr\\Scroll1\\20230205180739\\.zarray");
 

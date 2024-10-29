@@ -137,6 +137,29 @@ static inline chunk *avgpool(chunk *inchunk, s32 kernel, s32 stride) {
   return ret;
 }
 
+static inline chunk *sumpool(chunk *inchunk, s32 kernel, s32 stride) {
+  s32 dims[3] = {
+    (inchunk->dims[0] + stride - 1) / stride, (inchunk->dims[1] + stride - 1) / stride,
+    (inchunk->dims[2] + stride - 1) / stride
+  };
+  chunk *ret = chunk_new(dims);
+  for (s32 z = 0; z < ret->dims[0]; z++)
+    for (s32 y = 0; y < ret->dims[1]; y++)
+      for (s32 x = 0; x < ret->dims[2]; x++) {
+        f32 sum = 0.0f;
+        for (s32 zi = 0; zi < kernel; zi++)
+          for (s32 yi = 0; yi < kernel; yi++)
+            for (s32 xi = 0; xi < kernel; xi++) {
+              if (z + zi > inchunk->dims[0] || y + yi > inchunk->dims[1] || x + xi > inchunk->dims[2]) {
+                continue;
+              }
+              sum += chunk_at(inchunk, z * stride + zi, y * stride + yi, x * stride + xi);
+            }
+        chunk_set(ret, z, y, x, sum);
+      }
+  return ret;
+}
+
 
 static chunk *create_box_kernel(s32 size) {
   int dims[3] = {size,size,size};
@@ -198,6 +221,53 @@ static chunk* unsharp_mask_3d(chunk* input, float amount, s32 kernel_size) {
 
   chunk_free(kernel);
   chunk_free(blurred);
+
+  return output;
+}
+
+static chunk* normalize_chunk(chunk* input) {
+  // Create output chunk with same dimensions
+  int dims[3] = {input->dims[0], input->dims[1], input->dims[2]};
+  chunk* output = chunk_new(dims);
+
+  // First pass: find min and max values
+  float min_val = INFINITY;
+  float max_val = -INFINITY;
+
+  for (s32 z = 0; z < input->dims[0]; z++) {
+    for (s32 y = 0; y < input->dims[1]; y++) {
+      for (s32 x = 0; x < input->dims[2]; x++) {
+        float val = chunk_at(input, z, y, x);
+        min_val = minfloat(min_val, val);
+        max_val = maxfloat(max_val, val);
+      }
+    }
+  }
+
+  // Handle edge case where all values are the same
+  float range = max_val - min_val;
+  if (range == 0.0f) {
+    // If all values are the same, set everything to 0.5
+    for (s32 z = 0; z < input->dims[0]; z++) {
+      for (s32 y = 0; y < input->dims[1]; y++) {
+        for (s32 x = 0; x < input->dims[2]; x++) {
+          chunk_set(output, z, y, x, 0.5f);
+        }
+      }
+    }
+    return output;
+  }
+
+  // Second pass: normalize values to [0.0, 1.0]
+  for (s32 z = 0; z < input->dims[0]; z++) {
+    for (s32 y = 0; y < input->dims[1]; y++) {
+      for (s32 x = 0; x < input->dims[2]; x++) {
+        float val = chunk_at(input, z, y, x);
+        float normalized = (val - min_val) / range;
+        chunk_set(output, z, y, x, normalized);
+      }
+    }
+  }
 
   return output;
 }

@@ -463,7 +463,7 @@ static inline void process_cube(const float* values,
 
 // Main marching cubes function
 static inline int march_cubes(const float* values,      // Input 3D array of values
-                int dimx, int dimy, int dimz,  // Dimensions of the input array
+                int dimz, int dimy, int dimx,  // Dimensions of the input array
                 float isovalue,            // Isovalue to extract surface at
                 float** out_vertices,      // Output vertex array [x,y,z,x,y,z,...]
                 int** out_indices,         // Output index array
@@ -506,5 +506,5 @@ static inline int march_cubes(const float* values,      // Input 3D array of val
     *out_vertex_count = vertex_count;
     *out_index_count = index_count;
 
-    return 1;
+    return 0;
 }

@@ -371,8 +371,6 @@ set(CURL_STATIC_CRT ON CACHE BOOL "Link the static CRT" FORCE)
 set(BUILD_CURL_EXE OFF CACHE BOOL "Build curl executable" FORCE)
 
 # TODO: figure out what we actually need and dont
-#set(CMAKE_USE_BEARSSL ON CACHE BOOL "Use BearSSL code" FORCE)
-#set(CURL_USE_BEARSSL ON CACHE BOOL "Use BearSSL code" FORCE)
 #set(CURL_DISABLE_DICT ON CACHE BOOL "Disable DICT" FORCE)
 #set(CURL_DISABLE_FILE ON CACHE BOOL "Disable FILE" FORCE)
 #set(CURL_DISABLE_FTP ON CACHE BOOL "Disable FTP" FORCE)
@@ -390,16 +388,26 @@ set(USE_BEARSSL ON)
 include_directories(SYSTEM ./third-party/BearSSL/inc)
 set(_valid_default_ssl_backend TRUE)
 set(_curl_ca_bundle_supported TRUE)
-
-
-
 add_subdirectory(third-party/curl)
 
-target_link_libraries(volcanotest PUBLIC libcurl_static bearssl)
-target_link_libraries(volcano PUBLIC libcurl_static bearssl)
+#cblosc2
+set(BLOSC_IS_SUBPROJECT TRUE)
+set(BLOSC_INSTALL FALSE)
+set(BUILD_STATIC ON)
+set(BUILD_SHARED OFF)
+set(BUILD_TESTS OFF)
+set(BUILD_BENCHMARKS OFF)
+set(BUILD_EXAMPLES OFF)
+set(BUILD_FUZZERS OFF)
+add_subdirectory(third-party/c-blosc2)
 
-target_include_directories(volcanotest PUBLIC third-party/curl/include)
-target_include_directories(volcano PUBLIC third-party/curl/include)
+
+
+target_link_libraries(volcanotest PUBLIC libcurl_static bearssl blosc2_static)
+target_link_libraries(volcano PUBLIC libcurl_static bearssl blosc2_static)
+
+target_include_directories(volcanotest PUBLIC third-party/curl/include third-party/c-blosc2/include)
+target_include_directories(volcano PUBLIC third-party/curl/include third-party/c-blosc2/include)
 
 if(WIN32)
   target_compile_definitions(volcanotest PUBLIC CURL_STATICLIB)

@@ -34,7 +34,7 @@
 #include <getopt.h>
 
 //#include <curl/curl.h>
-//#include <blosc2.h>
+#include <blosc2.h>
 #include "json.h/json.h"
 #include "minicurl.h"
 #include "minimesher.h"

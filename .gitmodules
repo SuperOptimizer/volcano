@@ -13,3 +13,6 @@
 [submodule "third-party/BearSSL"]
 	path = third-party/BearSSL
 	url = https://www.bearssl.org/git/BearSSL
+[submodule "third-party/c-blosc2"]
+	path = third-party/c-blosc2
+	url = https://github.com/Blosc/c-blosc2.git

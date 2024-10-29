@@ -48,6 +48,7 @@
 #include "minimath.h"
 #include "miniz.h"
 #include "snic.h"
+#include "minivcps.h"
 
 
 typedef uint8_t u8;

@@ -109,6 +109,62 @@ int testmath() {
   return 0;
 }
 
+int testvcps() {
+    size_t width = 2, height = 2, dim = 3;
+    size_t total_points = width * height * dim;
+
+    // Test float->double->float conversion
+    printf("Testing float->double->float conversion:\n");
+    float* test_float_data = malloc(total_points * sizeof(float));
+    for (size_t i = 0; i < total_points; i++) {
+        test_float_data[i] = (float)i + 0.5f;
+    }
+
+    // Write float data as double
+    if (write_vcps("test_double.vcps", width, height, dim, test_float_data, "float", "double")) {
+        fprintf(stderr, "Failed to write float->double test file\n");
+        free(test_float_data);
+        return 1;
+    }
+
+    // Read it back as float
+    float* read_float_data = malloc(total_points * sizeof(float));
+    size_t read_width, read_height, read_dim;
+
+    int read_status = read_vcps("test_double.vcps", &read_width, &read_height, &read_dim, read_float_data, "float");
+    if (read_status) {
+        fprintf(stderr, "Failed to read double->float test file (status=%d)\n", read_status);
+        free(test_float_data);
+        free(read_float_data);
+        return 1;
+    }
+
+    // Verify dimensions
+    if (width != read_width || height != read_height || dim != read_dim) {
+        fprintf(stderr, "Dimension mismatch: expected (%zux%zux%zu), got (%zux%zux%zu)\n",
+                width, height, dim, read_width, read_height, read_dim);
+        free(test_float_data);
+        free(read_float_data);
+        return 1;
+    }
+
+    // Verify float data
+    int float_test_passed = 1;
+    for (size_t i = 0; i < total_points; i++) {
+        if (fabsf(test_float_data[i] - read_float_data[i]) > 1e-6f) {
+            fprintf(stderr, "Float data mismatch at %zu: %f != %f\n",
+                    i, test_float_data[i], read_float_data[i]);
+            float_test_passed = 0;
+            break;
+        }
+    }
+    // Clean up
+    free(test_float_data);
+    free(read_float_data);
+
+    return float_test_passed ? 0 : 1;
+}
+
 
 int main(int argc, char** argv) {
   if(testcurl()) printf("testcurl failed\n");
@@ -118,6 +174,7 @@ int main(int argc, char** argv) {
   if(testhistogram()) printf("testhistogram failed\n");
   if(testmesher()) printf("testmesher failed\n");
   if(testmath()) printf("testmath failed\n");
+  if(testvcps()) printf("testvcps failed\n");
 
 
   printf("Hello World\n");

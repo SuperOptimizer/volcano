@@ -7,6 +7,7 @@
 #include <stdbool.h>
 //#include <zlib.h>
 
+#include "miniutils.h"
 #include "miniz.h"
 
 #define MAX_LINE_LENGTH 1024
@@ -32,14 +33,7 @@ static bool str_starts_with(const char* str, const char* prefix) {
     return strncmp(str, prefix, strlen(prefix)) == 0;
 }
 
-static void trim(char* str) {
-    char* end;
-    while(isspace((unsigned char)*str)) str++;
-    if(*str == 0) return;
-    end = str + strlen(str) - 1;
-    while(end > str && isspace((unsigned char)*end)) end--;
-    end[1] = '\0';
-}
+
 
 static bool parse_sizes(char* value, nrrd_t* nrrd) {
     char* token = strtok(value, " ");

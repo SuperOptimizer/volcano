@@ -1,4 +1,4 @@
-#include "../volcano_example.h"
+#include "../volcano.h"
 
 int testcurl() {
   printf("%s\n",__FUNCTION__);

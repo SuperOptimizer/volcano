@@ -31,18 +31,8 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <math.h>
-#include <getopt.h>
 
 #include "minilibs.h"
-
-
-
-
-
-
-
-
-
 
 PUBLIC chunk *tiff_to_chunk(const char *tiffpath) {
   TiffImage *img = readTIFF(tiffpath);
@@ -106,7 +96,7 @@ PUBLIC slice *tiff_to_slice(const char *tiffpath, int index) {
 
 
 
-static inline int slice_fill(slice *slice, volume *vol, int start[static 2], int axis) {
+PUBLIC int slice_fill(slice *slice, volume *vol, int start[static 2], int axis) {
   assert(axis == 'z' || axis == 'y' || axis == 'x');
   if (start[0] + slice->dims[0] < 0 || start[0] + slice->dims[0] > vol->dims[0]) {
     assert(false);
@@ -126,7 +116,7 @@ static inline int slice_fill(slice *slice, volume *vol, int start[static 2], int
   return 0;
 }
 
-static inline int chunk_fill(chunk *chunk, volume *vol, int start[static 3]) {
+PUBLIC int chunk_fill(chunk *chunk, volume *vol, int start[static 3]) {
   if (start[0] + chunk->dims[0] < 0 || start[0] + chunk->dims[0] > vol->dims[0]) {
     assert(false);
     return 1;
@@ -150,10 +140,6 @@ static inline int chunk_fill(chunk *chunk, volume *vol, int start[static 3]) {
   }
   return 0;
 }
-
-
-
-
 
 PUBLIC int easy_snic(chunk *mychunk, s32 density, f32 compactness, chunk **labelsout, Superpixel **superpixelsout) {
   s32 lz, ly, lx;

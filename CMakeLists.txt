@@ -20,15 +20,12 @@ endif ()
 
 include_directories(. third-party/)
 
-set(SOURCES volcano.h
-    volcano.c)
 
 add_executable(volcanotest
     examples/runtests.c
-    ${SOURCES}
 )
 
-add_executable(volcano examples/volcano_example.c ${SOURCES})
+add_executable(volcano examples/volcano_example.c )
 
 
 
@@ -405,7 +402,7 @@ set_target_properties(blosc2_static PROPERTIES
     C_VISIBILITY_PRESET hidden
 )
 
-add_library(volcano_static STATIC ${SOURCES})
+add_library(volcano_static STATIC volcano.c)
 target_compile_definitions(volcano_static PUBLIC MINILIBS_STATIC_LIB)
 target_link_libraries(volcano_static PRIVATE
     libcurl_static
@@ -417,7 +414,7 @@ if(WIN32)
 endif()
 
 # 3. Dynamic library
-add_library(volcano_shared SHARED ${SOURCES})
+add_library(volcano_shared SHARED volcano.c)
 target_compile_definitions(volcano_shared PUBLIC MINILIBS_DYNAMIC_LIB)
 target_link_libraries(volcano_shared PRIVATE
     libcurl_static

@@ -32,7 +32,7 @@ typedef struct zarr_metadata {
   int32_t zarr_format;
 } zarr_metadata;
 
-static inline struct json_value_s *find_value(const struct json_object_s *obj, const char *key) {
+PRIVATE struct json_value_s *find_value(const struct json_object_s *obj, const char *key) {
   struct json_object_element_s *element = obj->start;
   while (element) {
     if (element->name->string_size == strlen(key) &&
@@ -44,7 +44,7 @@ static inline struct json_value_s *find_value(const struct json_object_s *obj, c
   return NULL;
 }
 
-static inline void parse_int32_array(struct json_array_s *array, int32_t output[3]) {
+PRIVATE void parse_int32_array(struct json_array_s *array, int32_t output[3]) {
   struct json_array_element_s *element = array->start;
   for (int i = 0; i < 3 && element; i++) {
     struct json_number_s *num = element->value->payload;
@@ -53,7 +53,7 @@ static inline void parse_int32_array(struct json_array_s *array, int32_t output[
   }
 }
 
-static inline int parse_zarr_metadata(const char *json_string, zarr_metadata *metadata) {
+PRIVATE int parse_zarr_metadata(const char *json_string, zarr_metadata *metadata) {
   struct json_value_s *root = json_parse(json_string, strlen(json_string));
   if (!root) {
     printf("Failed to parse JSON!\n");
@@ -136,7 +136,7 @@ static inline int parse_zarr_metadata(const char *json_string, zarr_metadata *me
 }
 
 
-static inline zarr_metadata parse_zarray(char *path) {
+PUBLIC zarr_metadata parse_zarray(char *path) {
   zarr_metadata metadata = {0};
 
   FILE *fp = fopen(path, "rt");

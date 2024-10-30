@@ -3,12 +3,15 @@ project(volcano C)
 
 set(CMAKE_C_STANDARD 11)
 
-add_compile_options(-Wall -Wextra -Wpedantic -g3)
+add_compile_options(-Wall -Wextra -Wpedantic -g3 -fpic -fpie -fPIE)
 #link_libraries(-lz)
+
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_compile_options(-g3)
+  add_compile_options(-O1)
   add_compile_definitions(DEBUG)
 else ()
   add_compile_options(-O2)
@@ -18,30 +21,18 @@ endif ()
 include_directories(. third-party/)
 
 set(SOURCES volcano.h
-    third-party/json.h/json.h
-    third-party/minitiff.h
-    third-party/snic.h
-    third-party/mininrrd.h
-    third-party/miniz.h
-    third-party/minihistogram.h
-    third-party/minippm.h
-    third-party/miniobj.h
-    third-party/minimesher.h
-    third-party/miniply.h
-    third-party/minizarr.h
-    third-party/minimath.h
-    third-party/minicurl.h)
+    volcano.c)
 
 add_executable(volcanotest
     examples/runtests.c
     ${SOURCES}
 )
 
-add_executable(volcano examples/volcano.c ${SOURCES})
+add_executable(volcano examples/volcano_example.c ${SOURCES})
 
 
 
-add_library(bearssl
+add_library(bearssl STATIC
     #third-party/BearSSL/samples/client_basic.c
     #third-party/BearSSL/samples/custom_profile.c
     #third-party/BearSSL/samples/server_basic.c
@@ -361,6 +352,11 @@ add_library(bearssl
     third-party/BearSSL/tools/verify.c
     third-party/BearSSL/tools/xmem.c)
 
+set_target_properties(bearssl PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+)
+
 target_include_directories(bearssl PUBLIC third-party/BearSSL/src)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
@@ -389,6 +385,10 @@ include_directories(SYSTEM ./third-party/BearSSL/inc)
 set(_valid_default_ssl_backend TRUE)
 set(_curl_ca_bundle_supported TRUE)
 add_subdirectory(third-party/curl)
+set_target_properties(libcurl_static PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+)
 
 #cblosc2
 set(BLOSC_IS_SUBPROJECT TRUE)
@@ -400,6 +400,41 @@ set(BUILD_BENCHMARKS OFF)
 set(BUILD_EXAMPLES OFF)
 set(BUILD_FUZZERS OFF)
 add_subdirectory(third-party/c-blosc2)
+set_target_properties(blosc2_static PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+)
+
+add_library(volcano_static STATIC ${SOURCES})
+target_compile_definitions(volcano_static PUBLIC MINILIBS_STATIC_LIB)
+target_link_libraries(volcano_static PRIVATE
+    libcurl_static
+    bearssl
+    blosc2_static
+)
+if(WIN32)
+  target_link_libraries(volcano_static PRIVATE ws2_32 crypt32 normaliz wldap32)
+endif()
+
+# 3. Dynamic library
+add_library(volcano_shared SHARED ${SOURCES})
+target_compile_definitions(volcano_shared PUBLIC MINILIBS_DYNAMIC_LIB)
+target_link_libraries(volcano_shared PRIVATE
+    libcurl_static
+    bearssl
+    blosc2_static
+)
+if(WIN32)
+  target_link_libraries(volcano_shared PRIVATE ws2_32 crypt32 normaliz wldap32)
+  target_compile_definitions(volcano_shared PRIVATE CURL_STATICLIB)
+endif()
+
+# Set properties for the shared library
+set_target_properties(volcano_shared PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
 
 
 
@@ -415,3 +450,14 @@ if(WIN32)
   target_link_libraries(volcanotest PUBLIC ws2_32 crypt32 normaliz wldap32)
   target_link_libraries(volcano PUBLIC ws2_32 crypt32 normaliz wldap32)
 endif()
+
+
+
+# Installation rules
+install(TARGETS volcano volcanotest volcano_static volcano_shared
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    INCLUDES DESTINATION include
+)
+install(FILES volcano.h DESTINATION include)

@@ -7,6 +7,7 @@
 #include <stdbool.h>
 //#include <zlib.h>
 
+#include "minilibs.h"
 #include "miniutils.h"
 #include "miniz.h"
 
@@ -29,13 +30,11 @@ typedef struct {
     bool is_valid;
 } nrrd_t;
 
-static bool str_starts_with(const char* str, const char* prefix) {
-    return strncmp(str, prefix, strlen(prefix)) == 0;
-}
 
 
 
-static bool parse_sizes(char* value, nrrd_t* nrrd) {
+
+PRIVATE bool parse_sizes(char* value, nrrd_t* nrrd) {
     char* token = strtok(value, " ");
     int i = 0;
     while (token != NULL && i < nrrd->dimension) {
@@ -50,7 +49,7 @@ static bool parse_sizes(char* value, nrrd_t* nrrd) {
     return i == nrrd->dimension;
 }
 
-static bool parse_space_directions(char* value, nrrd_t* nrrd) {
+PRIVATE bool parse_space_directions(char* value, nrrd_t* nrrd) {
     char* token = strtok(value, ") (");
     int i = 0;
     while (token != NULL && i < nrrd->dimension) {
@@ -73,7 +72,7 @@ static bool parse_space_directions(char* value, nrrd_t* nrrd) {
     return true;
 }
 
-static bool parse_space_origin(char* value, nrrd_t* nrrd) {
+PRIVATE bool parse_space_origin(char* value, nrrd_t* nrrd) {
     // Remove parentheses
     value++; // Skip first '('
     value[strlen(value)-1] = '\0'; // Remove last ')'
@@ -88,7 +87,7 @@ static bool parse_space_origin(char* value, nrrd_t* nrrd) {
     return true;
 }
 
-static size_t get_type_size(const char* type) {
+PRIVATE size_t get_type_size(const char* type) {
     if (strcmp(type, "uint8") == 0 || strcmp(type, "uchar") == 0) return 1;
     if (strcmp(type, "uint16") == 0) return 2;
     if (strcmp(type, "uint32") == 0) return 4;
@@ -97,7 +96,7 @@ static size_t get_type_size(const char* type) {
     return 0;
 }
 
-static bool read_raw_data(FILE* fp, nrrd_t* nrrd) {
+PRIVATE bool read_raw_data(FILE* fp, nrrd_t* nrrd) {
     size_t bytes_read = fread(nrrd->data, 1, nrrd->data_size, fp);
     if (bytes_read != nrrd->data_size) {
         printf("Failed to read data: expected %zu bytes, got %zu",
@@ -107,7 +106,7 @@ static bool read_raw_data(FILE* fp, nrrd_t* nrrd) {
     return true;
 }
 
-static bool read_gzip_data(FILE* fp, nrrd_t* nrrd) {
+PRIVATE bool read_gzip_data(FILE* fp, nrrd_t* nrrd) {
     z_stream strm = {0};
     unsigned char in[16384];
     size_t bytes_written = 0;
@@ -149,7 +148,7 @@ static bool read_gzip_data(FILE* fp, nrrd_t* nrrd) {
     return true;
 }
 
-nrrd_t* nrrd_read(const char* filename) {
+PUBLIC nrrd_t* nrrd_read(const char* filename) {
     FILE* fp = fopen(filename, "rb");
     if (!fp) {
         printf("could not open %s\n",filename);
@@ -290,8 +289,9 @@ cleanup:
     return nrrd;
 }
 
-void nrrd_free(nrrd_t* nrrd) {
+PUBLIC nrrd_free(nrrd_t* nrrd) {
     if (nrrd) {
         if (nrrd->data) free(nrrd->data);
+        free(nrrd);
     }
 }

@@ -1,6 +1,8 @@
-#include "../volcano.h"
+#include "../volcano_example.h"
 
 int testcurl() {
+  printf("%s\n",__FUNCTION__);
+
   char* buf;
   long len = download("https://dl.ash2txt.org/full-scrolls/Scroll1/PHercParis4.volpkg/paths/20230503225234/author.txt", &buf);
   if(len!= 6) {
@@ -12,6 +14,8 @@ int testcurl() {
 }
 
 int testhistogram() {
+  printf("%s\n",__FUNCTION__);
+
   chunk* mychunk = tiff_to_chunk("../example_data/example_3d.tif");
   slice* myslice = tiff_to_slice("../example_data/example_3d.tif", 0);
   histogram* slice_hist = slice_histogram(myslice->data, myslice->dims[0],myslice->dims[1], 256);
@@ -34,6 +38,8 @@ int testhistogram() {
 }
 
 int testzarr() {
+  printf("%s\n",__FUNCTION__);
+
   zarr_metadata metadata = parse_zarray("..\\example_data\\test.zarray");
   int z = metadata.shape[0];
   int y = metadata.shape[1];
@@ -67,6 +73,8 @@ int testzarr() {
 }
 
 int testmesher() {
+  printf("%s\n",__FUNCTION__);
+
   chunk* mychunk = tiff_to_chunk("../example_data/example_3d.tif");
 
   chunk* rescaled = normalize_chunk(mychunk);
@@ -84,6 +92,8 @@ int testmesher() {
 }
 
 int testmath() {
+  printf("%s\n",__FUNCTION__);
+
   chunk* mychunk = chunk_new((s32[3]){128,128,128});
   for(int z =0; z < 128; z++) {
     for(int y =0; y < 128; y++) {
@@ -110,11 +120,12 @@ int testmath() {
 }
 
 int testvcps() {
+  printf("%s\n",__FUNCTION__);
+
     size_t width = 2, height = 2, dim = 3;
     size_t total_points = width * height * dim;
 
     // Test float->double->float conversion
-    printf("Testing float->double->float conversion:\n");
     float* test_float_data = malloc(total_points * sizeof(float));
     for (size_t i = 0; i < total_points; i++) {
         test_float_data[i] = (float)i + 0.5f;
@@ -165,57 +176,55 @@ int testvcps() {
     return float_test_passed ? 0 : 1;
 }
 
+int testchamfer() {
+  printf("%s\n",__FUNCTION__);
+  float *vertices1, *vertices2;
+  float *normals1, *normals2;
+  int *indices1, *indices2;
+  int vertex_count1, vertex_count2;
+  int index_count1, index_count2;
+  int normal_count1, normal_count2;
+
+
+  if (read_ply("../example_data/cell_yxz_002_007_070.ply", &vertices1, &normals1, &indices1, &vertex_count1, &normal_count1, &index_count1) != 0) {
+    printf("Failed to read first mesh\n");
+    return 1;
+  }
+
+  if (read_ply("../example_data/cell_yxz_002_007_071.ply", &vertices2, &normals2, &indices2, &vertex_count2, &normal_count2, &index_count2) != 0) {
+    printf("Failed to read second mesh\n");
+    free(vertices1);
+    free(indices1);
+    return 1;
+  }
+
+  float distance = chamfer_distance(vertices1, vertex_count1,
+                                  vertices2, vertex_count2);
+
+  printf("Chamfer distance between meshes: %f\n", distance);
+
+  // Clean up
+  free(vertices1);
+  free(vertices2);
+  free(indices1);
+  free(indices2);
+  return 0;
+}
+
+int testply() {
+
+}
 
 int main(int argc, char** argv) {
   if(testcurl()) printf("testcurl failed\n");
-  if(testhistogram()) printf("testcurl failed\n");
-  if(testzarr()) printf("testcurl failed\n");
-  if(testmesher()) printf("testcurl failed\n");
+  if(testzarr()) printf("testzarr failed\n");
   if(testhistogram()) printf("testhistogram failed\n");
   if(testmesher()) printf("testmesher failed\n");
   if(testmath()) printf("testmath failed\n");
   if(testvcps()) printf("testvcps failed\n");
-
-
+  if(testchamfer())printf("testchamfer failed\n");
   printf("Hello World\n");
 
 
-#if 0
-  printf("%f\n", slice_at(myslice, 0, 0));
-  printf("%f\n", chunk_at(mychunk, 0, 0, 0));
-
-  chunk* smallchunk = avgpool(mychunk, 4, 4);
-  chunk* labels;
-  Superpixel* superpixels;
-  easy_snic(smallchunk, 4, 10.0f, &labels, &superpixels);
-
-
-  //mesh* mymesh = march(smallchunk, 32768.0f);
-  //write_mesh_to_ply("out.ply", mymesh);
-
-
-  //mesh_free(mymesh);
-  //free(mymesh);
-  //mymesh = NULL;
-
-  chunk_free(smallchunk);
-  free(smallchunk);
-  smallchunk = NULL;
-
-  nrrd_t* nrrd = nrrd_read("../example_data/example_volume_raw.nrrd");
-  if (!nrrd) {
-    printf("Failed to read NRRD file\n");
-    return 1;
-  }
-
-  printf("Dimensions: %d\n", nrrd->dimension);
-  printf("Type: %s\n", nrrd->type);
-  printf("Size: ");
-  for (int i = 0; i < nrrd->dimension; i++) { printf("%d ", nrrd->sizes[i]); }
-  printf("\n");
-
-  uint16_t* data = (uint16_t*)nrrd->data;
-  nrrd_free(nrrd);
-#endif
   return 0;
 }

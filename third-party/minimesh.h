@@ -15,6 +15,43 @@
 #include <assert.h>
 #include <math.h>
 
+#include "minilibs.h"
+
+// as assume that we have 3 component normals
+typedef struct {
+    float *vertices;
+    int *indices;
+    float *normals;
+    int vertex_count;
+    int index_count;
+} mesh;
+
+PUBLIC mesh* mesh_new(float *vertices,
+                    float *normals, // can be NULL if no normals
+                    int *indices,
+                    int vertex_count,
+                    int index_count) {
+
+    mesh* ret = malloc(sizeof(mesh));
+    ret->vertices = vertices;
+    ret->indices = indices;
+    ret->normals = normals;
+    ret->vertex_count = vertex_count;
+    ret->index_count = index_count;
+    return ret;
+}
+
+
+PUBLIC void mesh_free(mesh *mesh) {
+    if (mesh) {
+        free(mesh->vertices);
+        free(mesh->indices);
+        free(mesh->normals);
+        free(mesh);
+    }
+}
+
+
 static const int edgeTable[256]={
 0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
@@ -309,7 +346,7 @@ static const int triTable[256][16] =
 
 
 // Helper function to interpolate between two points
-static inline void interpolate_vertex(float isovalue,
+PRIVATE void interpolate_vertex(float isovalue,
                                     float v1, float v2,
                                     float x1, float y1, float z1,
                                     float x2, float y2, float z2,
@@ -339,12 +376,12 @@ static inline void interpolate_vertex(float isovalue,
     *out_z = z1 + mu * (z2 - z1);
 }
 
-static inline float get_value(const float* values, int x, int y, int z,
+PRIVATE float get_value(const float* values, int x, int y, int z,
                             int dimx, int dimy, int dimz) {
     return values[z * (dimx * dimy) + y * dimx + x];
 }
 
-static inline void process_cube(const float* values,
+PRIVATE void process_cube(const float* values,
                         int x, int y, int z,
                         int dimx, int dimy, int dimz,
                         float isovalue,
@@ -461,19 +498,16 @@ static inline void process_cube(const float* values,
     }
 }
 
-// Main marching cubes function
-static inline int march_cubes(const float* values,      // Input 3D array of values
-                int dimz, int dimy, int dimx,  // Dimensions of the input array
-                float isovalue,            // Isovalue to extract surface at
-                float** out_vertices,      // Output vertex array [x,y,z,x,y,z,...]
-                int** out_indices,         // Output index array
-                int* out_vertex_count,     // Number of vertices
-                int* out_index_count) {    // Number of indices
+PUBLIC int march_cubes(const float* values,
+                int dimz, int dimy, int dimx,
+                float isovalue,
+                float** out_vertices,      //  [z,y,x,z,y,x,...]
+                int** out_indices,
+                int* out_vertex_count,
+                int* out_index_count) {
 
-    // Calculate maximum possible number of triangles
     int max_triangles = (dimx - 1) * (dimy - 1) * (dimz - 1) * 5;
 
-    // Allocate output arrays
     float* vertices = malloc(sizeof(float) * max_triangles * 3 * 3); // 3 vertices per tri, 3 coords per vertex
     int* indices = malloc(sizeof(int) * max_triangles * 3);          // 3 indices per triangle
 
@@ -486,7 +520,6 @@ static inline int march_cubes(const float* values,      // Input 3D array of val
     int vertex_count = 0;
     int index_count = 0;
 
-    // Process each cube in the grid
     for (int z = 0; z < dimz - 1; z++) {
         for (int y = 0; y < dimy - 1; y++) {
             for (int x = 0; x < dimx - 1; x++) {

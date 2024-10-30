@@ -1,4 +1,4 @@
-#include "../volcano.h"
+#include "../volcano_example.h"
 
 
 static void print_usage(const char* program_name) {

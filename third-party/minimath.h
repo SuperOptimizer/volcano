@@ -10,6 +10,9 @@
 #include <assert.h>
 #include <math.h>
 
+#include "minilibs.h"
+
+
 typedef struct chunk {
   int dims[3];
   float data[];
@@ -20,15 +23,15 @@ typedef struct slice {
   float data[];
 } slice __attribute__((aligned(16)));
 
-static inline float maxfloat(float a, float b) { return a > b ? a : b; }
-static inline float minfloat(float a, float b) { return a < b ? a : b; }
-static inline float avgfloat(float *data, int len) {
+PRIVATE float maxfloat(float a, float b) { return a > b ? a : b; }
+PRIVATE float minfloat(float a, float b) { return a < b ? a : b; }
+PRIVATE float avgfloat(float *data, int len) {
   double sum = 0.0;
   for (int i = 0; i < len; i++) sum += data[i];
   return sum / len;
 }
 
-static inline chunk *chunk_new(int dims[static 3]) {
+PUBLIC chunk *chunk_new(int dims[static 3]) {
   chunk *ret = malloc(sizeof(chunk) + dims[0] * dims[1] * dims[2] * sizeof(float));
 
   if (ret == NULL) {
@@ -42,13 +45,11 @@ static inline chunk *chunk_new(int dims[static 3]) {
   return ret;
 }
 
-static inline void chunk_free(chunk *chunk) {
+PUBLIC void chunk_free(chunk *chunk) {
   free(chunk);
 }
 
-
-
-static inline slice *slice_new(int dims[static 2]) {
+PUBLIC slice *slice_new(int dims[static 2]) {
   slice *ret = malloc(sizeof(slice) + dims[0] * dims[1] * sizeof(float));
 
   if (ret == NULL) {
@@ -62,28 +63,28 @@ static inline slice *slice_new(int dims[static 2]) {
   return ret;
 }
 
-static inline void slice_free(slice *slice) {
+PUBLIC void slice_free(slice *slice) {
   free(slice);
 }
 
-static inline f32 slice_at(slice *slice, s32 y, s32 x) {
+PUBLIC f32 slice_at(slice *slice, s32 y, s32 x) {
   return slice->data[y * slice->dims[1] + x];
 }
 
-static inline void slice_set(slice *slice, s32 y, s32 x, f32 data) {
+PUBLIC void slice_set(slice *slice, s32 y, s32 x, f32 data) {
   slice->data[y * slice->dims[1] + x] = data;
 }
 
-static inline f32 chunk_at(chunk *chunk, s32 z, s32 y, s32 x) {
+PUBLIC f32 chunk_at(chunk *chunk, s32 z, s32 y, s32 x) {
   return chunk->data[z * chunk->dims[1] * chunk->dims[2] + y * chunk->dims[2] + x];
 }
 
-static inline void chunk_set(chunk *chunk, s32 z, s32 y, s32 x, f32 data) {
+PUBLIC void chunk_set(chunk *chunk, s32 z, s32 y, s32 x, f32 data) {
   chunk->data[z * chunk->dims[1] * chunk->dims[2] + y * chunk->dims[2] + x] = data;
 }
 
 
-static chunk* maxpool(chunk* inchunk, s32 kernel, s32 stride) {
+PUBLIC chunk* maxpool(chunk* inchunk, s32 kernel, s32 stride) {
   s32 dims[3] = {
     (inchunk->dims[0] + stride - 1) / stride, (inchunk->dims[1] + stride - 1) / stride,
     (inchunk->dims[2] + stride - 1) / stride
@@ -109,7 +110,7 @@ static chunk* maxpool(chunk* inchunk, s32 kernel, s32 stride) {
   return ret;
 }
 
-static inline chunk *avgpool(chunk *inchunk, s32 kernel, s32 stride) {
+PUBLIC chunk *avgpool(chunk *inchunk, s32 kernel, s32 stride) {
   s32 dims[3] = {
     (inchunk->dims[0] + stride - 1) / stride, (inchunk->dims[1] + stride - 1) / stride,
     (inchunk->dims[2] + stride - 1) / stride
@@ -137,7 +138,7 @@ static inline chunk *avgpool(chunk *inchunk, s32 kernel, s32 stride) {
   return ret;
 }
 
-static inline chunk *sumpool(chunk *inchunk, s32 kernel, s32 stride) {
+PUBLIC chunk *sumpool(chunk *inchunk, s32 kernel, s32 stride) {
   s32 dims[3] = {
     (inchunk->dims[0] + stride - 1) / stride, (inchunk->dims[1] + stride - 1) / stride,
     (inchunk->dims[2] + stride - 1) / stride
@@ -161,7 +162,7 @@ static inline chunk *sumpool(chunk *inchunk, s32 kernel, s32 stride) {
 }
 
 
-static chunk *create_box_kernel(s32 size) {
+PRIVATE chunk *create_box_kernel(s32 size) {
   int dims[3] = {size,size,size};
   chunk* kernel = chunk_new(dims);
   float value = 1.0f / (size * size * size);
@@ -171,7 +172,7 @@ static chunk *create_box_kernel(s32 size) {
   return kernel;
 }
 
-static chunk* convolve3d(chunk* input, chunk* kernel) {
+PRIVATE chunk* convolve3d(chunk* input, chunk* kernel) {
 
   s32 dims[3] = {input->dims[0], input->dims[1], input->dims[2]};
 
@@ -202,7 +203,7 @@ static chunk* convolve3d(chunk* input, chunk* kernel) {
   return ret;
 }
 
-static chunk* unsharp_mask_3d(chunk* input, float amount, s32 kernel_size) {
+PUBLIC chunk* unsharp_mask_3d(chunk* input, float amount, s32 kernel_size) {
   int dims[3] = {input->dims[0], input->dims[1], input->dims[2]};
   chunk* kernel = create_box_kernel(kernel_size);
   chunk* blurred = convolve3d(input, kernel);
@@ -225,7 +226,7 @@ static chunk* unsharp_mask_3d(chunk* input, float amount, s32 kernel_size) {
   return output;
 }
 
-static chunk* normalize_chunk(chunk* input) {
+PUBLIC chunk* normalize_chunk(chunk* input) {
   // Create output chunk with same dimensions
   int dims[3] = {input->dims[0], input->dims[1], input->dims[2]};
   chunk* output = chunk_new(dims);

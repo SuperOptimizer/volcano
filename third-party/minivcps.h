@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "miniutils.h"
+#include "minilibs.h"
 
 // Helper function to handle data conversion and reading
-static int read_binary_data(FILE* fp, void* out_data, const char* src_type, const char* dst_type, size_t count) {
+PRIVATE int read_binary_data(FILE* fp, void* out_data, const char* src_type, const char* dst_type, size_t count) {
     // Fast path: types match, direct read
     if (strcmp(src_type, dst_type) == 0) {
         size_t element_size = strcmp(src_type, "float") == 0 ? sizeof(float) : sizeof(double);
@@ -50,7 +50,7 @@ static int read_binary_data(FILE* fp, void* out_data, const char* src_type, cons
 }
 
 // Helper function to handle data conversion and writing
-static inline int write_binary_data(FILE* fp, const void* data, const char* src_type, const char* dst_type, size_t count) {
+PRIVATE int write_binary_data(FILE* fp, const void* data, const char* src_type, const char* dst_type, size_t count) {
     // Fast path: types match, direct write
     if (strcmp(src_type, dst_type) == 0) {
         size_t element_size = strcmp(src_type, "float") == 0 ? sizeof(float) : sizeof(double);
@@ -92,7 +92,7 @@ static inline int write_binary_data(FILE* fp, const void* data, const char* src_
 
 
 
-static inline int read_vcps(const char* filename,
+PUBLIC int read_vcps(const char* filename,
               size_t* width, size_t* height, size_t* dim,
               void* data, const char* dst_type) {
     if (!dst_type || (strcmp(dst_type, "float") != 0 && strcmp(dst_type, "double") != 0)) {
@@ -158,7 +158,7 @@ static inline int read_vcps(const char* filename,
     return status;
 }
 
-static inline int write_vcps(const char* filename,
+PUBLIC int write_vcps(const char* filename,
                size_t width, size_t height, size_t dim,
                const void* data, const char* src_type, const char* dst_type) {
     if (!src_type || !dst_type ||

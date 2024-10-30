@@ -8,16 +8,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef uint8_t u8;
-typedef int8_t s8;
-typedef uint16_t u16;
-typedef int16_t s16;
-typedef uint32_t u32;
-typedef int32_t s32;
-typedef uint64_t u64;
-typedef int64_t s64;
-typedef float f32;
-typedef double f64;
+#include "minilibs.h"
+
 
 
 // PPM format types
@@ -33,7 +25,7 @@ typedef struct ppm_image {
     u8* data;  // RGB data in row-major order
 } ppm_image;
 
-static inline ppm_image* ppm_new(u32 width, u32 height) {
+PUBLIC inline ppm_image* ppm_new(u32 width, u32 height) {
     ppm_image* img = malloc(sizeof(ppm_image));
     if (!img) {
         return NULL;
@@ -52,13 +44,14 @@ static inline ppm_image* ppm_new(u32 width, u32 height) {
     return img;
 }
 
-static inline void ppm_free(ppm_image* img) {
+PUBLIC inline void ppm_free(ppm_image* img) {
     if (img) {
         free(img->data);
+        free(img);
     }
 }
 
-static inline void skip_whitespace_and_comments(FILE* fp) {
+PRIVATE void skip_whitespace_and_comments(FILE* fp) {
     int c;
     while ((c = fgetc(fp)) != EOF) {
         if (c == '#') {
@@ -71,10 +64,9 @@ static inline void skip_whitespace_and_comments(FILE* fp) {
     }
 }
 
-static inline bool read_header(FILE* fp, ppm_type* type, u32* width, u32* height, u8* max_val) {
+PRIVATE bool read_header(FILE* fp, ppm_type* type, u32* width, u32* height, u8* max_val) {
     char magic[3];
 
-    // Read magic number
     if (fgets(magic, sizeof(magic), fp) == NULL) {
         return false;
     }
@@ -83,31 +75,28 @@ static inline bool read_header(FILE* fp, ppm_type* type, u32* width, u32* height
         return false;
     }
 
-    *type = (magic[1] == '3') ? P3 : P6;
+    *type = magic[1] == '3' ? P3 : P6;
 
     skip_whitespace_and_comments(fp);
 
-    // Read width and height
     if (fscanf(fp, "%u %u", width, height) != 2) {
         return false;
     }
 
     skip_whitespace_and_comments(fp);
 
-    // Read maximum value
     unsigned int max_val_temp;
     if (fscanf(fp, "%u", &max_val_temp) != 1 || max_val_temp > 255) {
         return false;
     }
     *max_val = (u8)max_val_temp;
 
-    // Skip one whitespace character after max_val
     fgetc(fp);
 
     return true;
 }
 
-static inline ppm_image* read_ppm(const char* filename) {
+PUBLIC ppm_image* read_ppm(const char* filename) {
     FILE* fp = fopen(filename, "rb");
     if (!fp) {
         return NULL;
@@ -156,7 +145,7 @@ static inline ppm_image* read_ppm(const char* filename) {
     return img;
 }
 
-static inline int write_ppm(const char* filename, const ppm_image* img, ppm_type type) {
+PUBLIC int write_ppm(const char* filename, const ppm_image* img, ppm_type type) {
     if (!img || !img->data) {
         return 1;
     }
@@ -191,8 +180,7 @@ static inline int write_ppm(const char* filename, const ppm_image* img, ppm_type
     return 0;
 }
 
-// Utility functions for working with PPM images
-static inline void ppm_set_pixel(ppm_image* img, u32 x, u32 y, u8 r, u8 g, u8 b) {
+PRIVATE void ppm_set_pixel(ppm_image* img, u32 x, u32 y, u8 r, u8 g, u8 b) {
     if (!img || x >= img->width || y >= img->height) {
         return;
     }
@@ -203,7 +191,7 @@ static inline void ppm_set_pixel(ppm_image* img, u32 x, u32 y, u8 r, u8 g, u8 b)
     img->data[idx + 2] = b;
 }
 
-static inline void ppm_get_pixel(const ppm_image* img, u32 x, u32 y, u8* r, u8* g, u8* b) {
+PRIVATE void ppm_get_pixel(const ppm_image* img, u32 x, u32 y, u8* r, u8* g, u8* b) {
     if (!img || x >= img->width || y >= img->height) {
         *r = *g = *b = 0;
         return;

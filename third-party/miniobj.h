@@ -10,10 +10,10 @@
 #include <stdbool.h>
 #include <assert.h>
 
+#include "minilibs.h"
 
 
-// Reader function that takes pointers to all components
-int read_obj(const char* filename,
+PUBLIC int read_obj(const char* filename,
             float** vertices, int** indices,
             int* vertex_count, int* index_count) {
     FILE* fp = fopen(filename, "r");
@@ -21,7 +21,6 @@ int read_obj(const char* filename,
         return 1;
     }
 
-    // Initial allocations
     size_t vertex_capacity = 1024;
     size_t index_capacity = 1024;
     *vertices = malloc(vertex_capacity * 3 * sizeof(float));
@@ -32,7 +31,6 @@ int read_obj(const char* filename,
     char line[256];
     while (fgets(line, sizeof(line), fp)) {
         if (line[0] == 'v' && line[1] == ' ') {
-            // Reallocate vertices if needed
             if (*vertex_count >= vertex_capacity) {
                 vertex_capacity *= 2;
                 float* new_vertices = realloc(*vertices, vertex_capacity * 3 * sizeof(float));
@@ -66,7 +64,6 @@ int read_obj(const char* filename,
                 }
             }
 
-            // Reallocate indices if needed
             if (*index_count + 3 > index_capacity) {
                 index_capacity *= 2;
                 int* new_indices = realloc(*indices, index_capacity * sizeof(int));
@@ -92,8 +89,7 @@ int read_obj(const char* filename,
     return 0;
 }
 
-// Writer function that takes the components directly
-int write_obj(const char* filename,
+PUBLIC int write_obj(const char* filename,
              const float* vertices, const int* indices,
              int vertex_count, int index_count) {
     FILE* fp = fopen(filename, "w");
@@ -101,8 +97,7 @@ int write_obj(const char* filename,
         return 1;
     }
 
-    // Write header comment
-    fprintf(fp, "# OBJ file created by mesh writer\n");
+    fprintf(fp, "# OBJ file created by minilibs/miniobj\n");
 
     // Write vertices
     for (int i = 0; i < vertex_count; i++) {

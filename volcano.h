@@ -33,78 +33,15 @@
 #include <math.h>
 #include <getopt.h>
 
-//#include <curl/curl.h>
-#include <blosc2.h>
-#include "json.h/json.h"
-#include "minicurl.h"
-#include "minimesher.h"
-#include "mininrrd.h"
-#include "miniobj.h"
-#include "miniply.h"
-#include "minippm.h"
-#include "minitiff.h"
-#include "minizarr.h"
-#include "minihistogram.h"
-#include "minimath.h"
-#include "miniz.h"
-#include "snic.h"
-#include "minivcps.h"
-
-
-typedef uint8_t u8;
-typedef int8_t s8;
-typedef uint16_t u16;
-typedef int16_t s16;
-typedef uint32_t u32;
-typedef int32_t s32;
-typedef uint64_t u64;
-typedef int64_t s64;
-typedef float f32;
-typedef double f64;
-
-
-
-//TODO: implement static and/or dynamic lib linking in addition to directly including this .h
-#define PUBLIC static inline
-#define PRIVATE static inline
-
-typedef enum errcode {
-  SUCCESS = 0,
-  FAIL = 1,
-} errcode;
-
-
-typedef struct volume {
-  s32 dims[3];
-  bool is_zarr;
-  bool is_tif_stack;
-  bool uses_3d_tif;
-  bool local_storage;
-} volume;
-
-
-typedef struct {
-  float *vertices;
-  int *indices;
-  int vertex_count;
-  int index_count;
-} mesh;
+#include "minilibs.h"
 
 
 
 
-PUBLIC volume *volume_new(s32 dims[static 3], bool is_zarr, bool is_tif_stack, bool uses_3d_tif, bool local_storage) {
-  assert(!(is_zarr && (is_tif_stack || uses_3d_tif)));
 
-  volume *ret = malloc(sizeof(volume));
-  if (ret == NULL) {
-    assert(false);
-    return NULL;
-  }
 
-  *ret = (volume){{dims[0], dims[1], dims[2]}, is_zarr, is_tif_stack, uses_3d_tif, local_storage};
-  return ret;
-}
+
+
 
 
 PUBLIC chunk *tiff_to_chunk(const char *tiffpath) {
@@ -214,12 +151,7 @@ static inline int chunk_fill(chunk *chunk, volume *vol, int start[static 3]) {
   return 0;
 }
 
-PUBLIC void mesh_free(mesh *mesh) {
-  if (mesh) {
-    free(mesh->vertices);
-    free(mesh->indices);
-  }
-}
+
 
 
 

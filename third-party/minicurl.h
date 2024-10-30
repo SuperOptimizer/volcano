@@ -4,15 +4,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Define a structure to hold our buffer data
+#include "minilibs.h"
+
 typedef struct {
     char* buffer;
     size_t size;
 } DownloadBuffer;
 
-static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+PRIVATE size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
-    DownloadBuffer *mem = (DownloadBuffer *)userp;
+    DownloadBuffer *mem = userp;
 
     char *new_buffer = realloc(mem->buffer, mem->size + realsize + 1);  // +1 for null terminator
     if (!new_buffer) {
@@ -27,7 +28,7 @@ static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *use
     return realsize;
 }
 
-static long download(const char* url, void** out_buffer) {
+PUBLIC long download(const char* url, void** out_buffer) {
     CURL* curl;
     CURLcode res;
     long http_code = 0;
@@ -61,10 +62,8 @@ static long download(const char* url, void** out_buffer) {
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
 
-    // Perform the request
     res = curl_easy_perform(curl);
 
-    // Check for errors
     if (res != CURLE_OK) {
         fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         free(chunk.buffer);
@@ -72,7 +71,6 @@ static long download(const char* url, void** out_buffer) {
         return -1;
     }
 
-    // Get HTTP response code
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     curl_easy_cleanup(curl);
 

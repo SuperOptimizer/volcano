@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include "minilibs.h"
+
 
 typedef struct histogram {
   int num_bins;
@@ -25,7 +27,7 @@ typedef struct hist_stats {
 } hist_stats;
 
 
-static inline histogram *histogram_new(int num_bins, float min_value, float max_value) {
+PUBLIC histogram *histogram_new(int num_bins, float min_value, float max_value) {
   histogram *hist = malloc(sizeof(histogram));
   if (!hist) {
     return NULL;
@@ -45,14 +47,15 @@ static inline histogram *histogram_new(int num_bins, float min_value, float max_
   return hist;
 }
 
-static inline void histogram_free(histogram *hist) {
+PUBLIC void histogram_free(histogram *hist) {
   if (hist) {
     free(hist->bins);
+    free(hist);
   }
 }
 
 
-static inline int get_bin_index(const histogram* hist, float value) {
+PRIVATE int get_bin_index(const histogram* hist, float value) {
     if (value <= hist->min_value) return 0;
     if (value >= hist->max_value) return hist->num_bins - 1;
 
@@ -61,7 +64,7 @@ static inline int get_bin_index(const histogram* hist, float value) {
     return bin;
 }
 
-static inline histogram* slice_histogram(const float* data,
+PUBLIC histogram* slice_histogram(const float* data,
                                       int dimy, int dimx,
                                       int num_bins) {
     if (!data || num_bins <= 0) {
@@ -91,7 +94,7 @@ static inline histogram* slice_histogram(const float* data,
     return hist;
 }
 
-static inline histogram* chunk_histogram(const float* data,
+PUBLIC histogram* chunk_histogram(const float* data,
                                       int dimz, int dimy, int dimx,
                                       int num_bins) {
     if (!data || num_bins <= 0) {
@@ -121,15 +124,15 @@ static inline histogram* chunk_histogram(const float* data,
     return hist;
 }
 
-static inline float get_slice_value(const float* data, int y, int x, int dimx) {
+PRIVATE float get_slice_value(const float* data, int y, int x, int dimx) {
     return data[y * dimx + x];
 }
 
-static inline float get_chunk_value(const float* data, int z, int y, int x,
+PRIVATE float get_chunk_value(const float* data, int z, int y, int x,
                                   int dimy, int dimx) {
     return data[z * (dimy * dimx) + y * dimx + x];
 }
-static inline int write_histogram_to_csv(const histogram *hist, const char *filename) {
+PUBLIC int write_histogram_to_csv(const histogram *hist, const char *filename) {
   FILE *fp = fopen(filename, "w");
   if (!fp) {
     return 1;
@@ -147,7 +150,7 @@ static inline int write_histogram_to_csv(const histogram *hist, const char *file
   return 0;
 }
 
-static inline hist_stats calculate_histogram_stats(const histogram *hist) {
+PUBLIC hist_stats calculate_histogram_stats(const histogram *hist) {
   hist_stats stats = {0};
 
   unsigned long long total_count = 0;

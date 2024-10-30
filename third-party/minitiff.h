@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "minilibs.h"
+
+
 #define TIFFTAG_SUBFILETYPE 254
 #define TIFFTAG_IMAGEWIDTH 256
 #define TIFFTAG_IMAGELENGTH 257
@@ -63,7 +66,7 @@ typedef struct {
     char errorMsg[256];
 } TiffImage;
 
-static uint32_t readBytes(FILE* fp, int count, int littleEndian) {
+PRIVATE uint32_t readBytes(FILE* fp, int count, int littleEndian) {
     uint32_t value = 0;
     uint8_t byte;
 
@@ -82,7 +85,7 @@ static uint32_t readBytes(FILE* fp, int count, int littleEndian) {
     return value;
 }
 
-static void readString(FILE* fp, char* str, uint32_t offset, uint32_t count, long currentPos) {
+PRIVATE void readString(FILE* fp, char* str, uint32_t offset, uint32_t count, long currentPos) {
     long savedPos = ftell(fp);
     fseek(fp, offset, SEEK_SET);
     fread(str, 1, count - 1, fp);
@@ -90,7 +93,7 @@ static void readString(FILE* fp, char* str, uint32_t offset, uint32_t count, lon
     fseek(fp, savedPos, SEEK_SET);
 }
 
-static float readRational(FILE* fp, uint32_t offset, int littleEndian, long currentPos) {
+PRIVATE float readRational(FILE* fp, uint32_t offset, int littleEndian, long currentPos) {
     long savedPos = ftell(fp);
     fseek(fp, offset, SEEK_SET);
     uint32_t numerator = readBytes(fp, 4, littleEndian);
@@ -99,7 +102,7 @@ static float readRational(FILE* fp, uint32_t offset, int littleEndian, long curr
     return denominator ? (float)numerator / denominator : 0.0f;
 }
 
-static void readIFDEntry(FILE* fp, DirectoryInfo* dir, int littleEndian, long ifdStart) {
+PRIVATE void readIFDEntry(FILE* fp, DirectoryInfo* dir, int littleEndian, long ifdStart) {
     uint16_t tag = readBytes(fp, 2, littleEndian);
     uint16_t type = readBytes(fp, 2, littleEndian);
     uint32_t count = readBytes(fp, 4, littleEndian);
@@ -165,7 +168,7 @@ static void readIFDEntry(FILE* fp, DirectoryInfo* dir, int littleEndian, long if
     }
 }
 
-static bool validateDirectory(DirectoryInfo* dir, TiffImage* img) {
+PRIVATE bool validateDirectory(DirectoryInfo* dir, TiffImage* img) {
     if (dir->width == 0 || dir->height == 0) {
         snprintf(img->errorMsg, sizeof(img->errorMsg), "Invalid dimensions");
         return false;
@@ -204,7 +207,7 @@ static bool validateDirectory(DirectoryInfo* dir, TiffImage* img) {
     return true;
 }
 
-static TiffImage* readTIFF(const char* filename) {
+PUBLIC TiffImage* readTIFF(const char* filename) {
     FILE* fp = fopen(filename, "rb");
     if (!fp) return NULL;
 
@@ -314,14 +317,15 @@ static TiffImage* readTIFF(const char* filename) {
     return img;
 }
 
-static void freeTIFF(TiffImage* img) {
+PUBLIC void freeTIFF(TiffImage* img) {
     if (img) {
         free(img->directories);
         free(img->data);
+        free(img);
     }
 }
 
-static const char* getCompressionName(uint16_t compression) {
+PRIVATE const char* getCompressionName(uint16_t compression) {
     switch (compression) {
         case 1: return "None";
         case 2: return "CCITT modified Huffman RLE";
@@ -336,7 +340,7 @@ static const char* getCompressionName(uint16_t compression) {
     }
 }
 
-static const char* getPhotometricName(uint16_t photometric) {
+PRIVATE const char* getPhotometricName(uint16_t photometric) {
     switch (photometric) {
         case 0: return "min-is-white";
         case 1: return "min-is-black";
@@ -350,7 +354,7 @@ static const char* getPhotometricName(uint16_t photometric) {
     }
 }
 
-static const char* getPlanarConfigName(uint16_t config) {
+PRIVATE const char* getPlanarConfigName(uint16_t config) {
     switch (config) {
         case 1: return "single image plane";
         case 2: return "separate image planes";
@@ -358,7 +362,7 @@ static const char* getPlanarConfigName(uint16_t config) {
     }
 }
 
-static const char* getSampleFormatName(uint16_t format) {
+PRIVATE const char* getSampleFormatName(uint16_t format) {
     switch (format) {
         case 1: return "unsigned integer";
         case 2: return "signed integer";
@@ -368,7 +372,7 @@ static const char* getSampleFormatName(uint16_t format) {
     }
 }
 
-static const char* getResolutionUnitName(uint16_t unit) {
+PRIVATE const char* getResolutionUnitName(uint16_t unit) {
     switch (unit) {
         case 1: return "unitless";
         case 2: return "inches";
@@ -377,7 +381,7 @@ static const char* getResolutionUnitName(uint16_t unit) {
     }
 }
 
-static void printTIFFTags(const TiffImage* img, int directory) {
+PUBLIC void printTIFFTags(const TiffImage* img, int directory) {
     if (!img || !img->directories || directory >= img->depth) return;
 
     const DirectoryInfo* dir = &img->directories[directory];
@@ -420,7 +424,7 @@ static void printTIFFTags(const TiffImage* img, int directory) {
     }
 }
 
-static void printAllTIFFTags(const TiffImage* img) {
+PUBLIC void printAllTIFFTags(const TiffImage* img) {
     if (!img) {
         printf("Error: NULL TIFF image\n");
         return;
@@ -437,7 +441,7 @@ static void printAllTIFFTags(const TiffImage* img) {
 }
 
 
-static size_t getTIFFDirectorySize(const TiffImage* img, int directory) {
+PRIVATE size_t getTIFFDirectorySize(const TiffImage* img, int directory) {
     if (!img || !img->isValid || !img->directories || directory >= img->depth) {
         return 0;
     }
@@ -446,7 +450,7 @@ static size_t getTIFFDirectorySize(const TiffImage* img, int directory) {
     return dir->width * dir->height * (dir->bitsPerSample / 8);
 }
 
-static void* readTIFFDirectoryData(const TiffImage* img, int directory) {
+PRIVATE void* readTIFFDirectoryData(const TiffImage* img, int directory) {
 
     size_t bufferSize = getTIFFDirectorySize(img, directory);
     void* buffer = malloc(bufferSize);
@@ -468,10 +472,10 @@ static void* readTIFFDirectoryData(const TiffImage* img, int directory) {
     return buffer;
 }
 
-static uint16_t getTIFFPixel16FromBuffer(const uint16_t* buffer, int y, int x, int width) {
+PRIVATE uint16_t getTIFFPixel16FromBuffer(const uint16_t* buffer, int y, int x, int width) {
     return buffer[ y * width + x];
 }
 
-static uint8_t getTIFFPixel8FromBuffer(const uint8_t* buffer, int y, int x, int width) {
+PRIVATE uint8_t getTIFFPixel8FromBuffer(const uint8_t* buffer, int y, int x, int width) {
     return buffer[y * width + x];
 }

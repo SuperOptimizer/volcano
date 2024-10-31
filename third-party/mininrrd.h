@@ -289,7 +289,7 @@ cleanup:
     return nrrd;
 }
 
-PUBLIC nrrd_free(nrrd_t* nrrd) {
+PUBLIC void nrrd_free(nrrd_t* nrrd) {
     if (nrrd) {
         if (nrrd->data) free(nrrd->data);
         free(nrrd);

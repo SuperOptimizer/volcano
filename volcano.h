@@ -1,22 +1,5 @@
 #pragma once
 
-
-// Vocab:
-// A volume is an entire scroll
-//   - for Scroll 1 it is all 14376 x 7888 x 8096 voxels
-//   - the dtype is uint8 or uint16
-// A chunk is a 3d cross section of data
-//   - this could be a 512x512x512 section starting at 2000x2000x2000 and ending at 2512 x 2512 x 2512
-//   - the dtype is float32
-// A slice is a 2d cross section of data
-
-// Notes:
-//   - index order is in Z Y X order
-//     - increasing Z means increasing through the slice. e.g. 1000.tif -> 1001.tif
-//     - increasing Y means looking farther down in a slice
-//     - increasing X means looking farther right in a slice
-//   - a 0 / SUCCESS return code indicates success for functions that do NOT return a pointer
-
 #include <ctype.h>
 #include <limits.h>
 #include <stddef.h>
@@ -33,6 +16,8 @@
 #include <math.h>
 
 #include "minilibs.h"
+
+
 
 PUBLIC chunk *tiff_to_chunk(const char *tiffpath) {
   TiffImage *img = readTIFF(tiffpath);

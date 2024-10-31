@@ -76,8 +76,8 @@ int testmesher() {
   printf("%s\n",__FUNCTION__);
 
   chunk* mychunk = tiff_to_chunk("../example_data/example_3d.tif");
-
-  chunk* rescaled = normalize_chunk(mychunk);
+  chunk* smallerchunk = sumpool(mychunk,2,2);
+  chunk* rescaled = normalize_chunk(smallerchunk);
   float* vertices;
   int* indices;
   int vertex_count, indices_count;
@@ -85,9 +85,13 @@ int testmesher() {
   if(ret != 0) {
     return 1;
   }
-
+  ret =write_ply("mymesh.ply",vertices,NULL,indices,vertex_count,indices_count);
+  if (ret != 0) {
+    return 1;
+  }
   chunk_free(rescaled);
   chunk_free(mychunk);
+  chunk_free(smallerchunk);
   return 0;
 }
 
@@ -109,7 +113,7 @@ int testmath() {
   for(int z =0; z < 64; z++) {
     for(int y =0; y < 64; y++) {
       for(int x =0; x < 64; x++) {
-        f32 val = chunk_at(smaller,z,y,x);
+        f32 val = chunk_get(smaller,z,y,x);
         if(val > 8.01f || val < 7.99f){
           return 1;
         }

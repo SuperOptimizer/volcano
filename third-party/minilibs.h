@@ -4,12 +4,24 @@
 // - when passing pointers to a _new function in order to fill out fields in the struct (e.g. mesh_new)
 //   the struct will take ownership of the pointer and the pointer shall be cleaned up in the _free function.
 //   The caller loses ownership of the pointer
+// - index order is in Z Y X order
+// - a 0 / SUCCESS return code indicates success for functions that do NOT return a pointer
+
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
+
+#ifndef MINILIBS_HEADER_ONLY
+  #ifndef MINILIBS_STATIC_LIB
+    #ifndef MINILIBS_DYNAMIC_LIB
+      #define MINILIBS_HEADER_ONLY
+    #endif
+  #endif
+#endif
+
 
 #ifdef MINILIBS_HEADER_ONLY
   #define PUBLIC static inline __attribute__((visibility("hidden")))

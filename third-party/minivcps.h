@@ -6,7 +6,6 @@
 
 #include "minilibs.h"
 
-// Helper function to handle data conversion and reading
 PRIVATE int read_binary_data(FILE* fp, void* out_data, const char* src_type, const char* dst_type, size_t count) {
     // Fast path: types match, direct read
     if (strcmp(src_type, dst_type) == 0) {
@@ -16,13 +15,12 @@ PRIVATE int read_binary_data(FILE* fp, void* out_data, const char* src_type, con
 
     // Conversion path
     if (strcmp(src_type, "double") == 0 && strcmp(dst_type, "float") == 0) {
-        // Reading doubles, converting to floats
         double* temp = malloc(count * sizeof(double));
         if (!temp) return 1;
 
         int status = fread(temp, sizeof(double), count, fp) == count ? 0 : 1;
         if (status == 0) {
-            float* out = (float*)out_data;
+            float* out = out_data;
             for (size_t i = 0; i < count; i++) {
                 out[i] = (float)temp[i];
             }
@@ -31,13 +29,12 @@ PRIVATE int read_binary_data(FILE* fp, void* out_data, const char* src_type, con
         return status;
     }
     else if (strcmp(src_type, "float") == 0 && strcmp(dst_type, "double") == 0) {
-        // Reading floats, converting to doubles
         float* temp = malloc(count * sizeof(float));
         if (!temp) return 1;
 
         int status = fread(temp, sizeof(float), count, fp) == count ? 0 : 1;
         if (status == 0) {
-            double* out = (double*)out_data;
+            double* out = out_data;
             for (size_t i = 0; i < count; i++) {
                 out[i] = (double)temp[i];
             }
@@ -49,7 +46,6 @@ PRIVATE int read_binary_data(FILE* fp, void* out_data, const char* src_type, con
     return 1;
 }
 
-// Helper function to handle data conversion and writing
 PRIVATE int write_binary_data(FILE* fp, const void* data, const char* src_type, const char* dst_type, size_t count) {
     // Fast path: types match, direct write
     if (strcmp(src_type, dst_type) == 0) {
@@ -59,11 +55,10 @@ PRIVATE int write_binary_data(FILE* fp, const void* data, const char* src_type, 
 
     // Conversion path
     if (strcmp(src_type, "float") == 0 && strcmp(dst_type, "double") == 0) {
-        // Converting floats to doubles
         double* temp = malloc(count * sizeof(double));
         if (!temp) return 1;
 
-        const float* in = (const float*)data;
+        const float* in = data;
         for (size_t i = 0; i < count; i++) {
             temp[i] = (double)in[i];
         }
@@ -73,11 +68,10 @@ PRIVATE int write_binary_data(FILE* fp, const void* data, const char* src_type, 
         return status;
     }
     else if (strcmp(src_type, "double") == 0 && strcmp(dst_type, "float") == 0) {
-        // Converting doubles to floats
         float* temp = malloc(count * sizeof(float));
         if (!temp) return 1;
 
-        const double* in = (const double*)data;
+        const double* in = data;
         for (size_t i = 0; i < count; i++) {
             temp[i] = (float)in[i];
         }
@@ -89,7 +83,6 @@ PRIVATE int write_binary_data(FILE* fp, const void* data, const char* src_type, 
 
     return 1;
 }
-
 
 
 PUBLIC int read_vcps(const char* filename,

@@ -1,4 +1,5 @@
-#include "../volcano_example.h"
+#include "../volcano.h"
+#include <getopt.h>
 
 
 static void print_usage(const char* program_name) {
@@ -217,8 +218,8 @@ int main(int argc, char** argv) {
   slice* myslice = tiff_to_slice("../example_data/example_3d.tif", 0);
   printf("%f\n", myslice->data[0]);
 
-  printf("%f\n", slice_at(myslice, 0, 0));
-  printf("%f\n", chunk_at(mychunk, 0, 0, 0));
+  printf("%f\n", slice_get(myslice, 0, 0));
+  printf("%f\n", chunk_get(mychunk, 0, 0, 0));
 
   chunk* smallchunk = avgpool(mychunk, 4, 4);
   chunk* labels;

@@ -1,16 +1,13 @@
 #pragma once
 
 #include <math.h>
-#include <float.h>
-#include <stdlib.h>
-#include <stdio.h>
 
 #include "minilibs.h"
 
 PRIVATE float squared_distance(const float* p1, const float* p2) {
-    float dx = p1[0] - p2[0];
+    float dz = p1[0] - p2[0];
     float dy = p1[1] - p2[1];
-    float dz = p1[2] - p2[2];
+    float dx = p1[2] - p2[2];
     return dx*dx + dy*dy + dz*dz;
 }
 

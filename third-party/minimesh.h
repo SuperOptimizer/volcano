@@ -1,23 +1,12 @@
 #pragma once
 
-#include <ctype.h>
-#include <limits.h>
-#include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <errno.h>
-#include <float.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <assert.h>
 #include <math.h>
 
 #include "minilibs.h"
 
-// as assume that we have 3 component normals
+// meshes are triangle only. every 3 entries in vertices corresponds to a new vertex
+// normals are 3 component
 typedef struct {
     float *vertices;
     int *indices;
@@ -48,6 +37,93 @@ PUBLIC void mesh_free(mesh *mesh) {
         free(mesh->indices);
         free(mesh->normals);
         free(mesh);
+    }
+}
+
+PUBLIC void mesh_get_bounds(const mesh *m,
+                    float *origin_z, float *origin_y, float *origin_x,
+                    float *length_z, float *length_y, float *length_x) {
+    if (!m || !m->vertices || m->vertex_count <= 0) {
+        if (origin_z) *origin_z = 0.0f;
+        if (origin_y) *origin_y = 0.0f;
+        if (origin_x) *origin_x = 0.0f;
+        if (length_z) *length_z = 0.0f;
+        if (length_y) *length_y = 0.0f;
+        if (length_x) *length_x = 0.0f;
+        return;
+    }
+
+    float min_z = m->vertices[0];
+    float max_z = m->vertices[0];
+    float min_y = m->vertices[1];
+    float max_y = m->vertices[1];
+    float min_x = m->vertices[2];
+    float max_x = m->vertices[2];
+
+    for (int i = 0; i < m->vertex_count * 3; i += 3) {
+        // Z
+        if (m->vertices[i] < min_z) min_z = m->vertices[i];
+        if (m->vertices[i] > max_z) max_z = m->vertices[i];
+
+        // Y
+        if (m->vertices[i + 1] < min_y) min_y = m->vertices[i + 1];
+        if (m->vertices[i + 1] > max_y) max_y = m->vertices[i + 1];
+
+        // X
+        if (m->vertices[i + 2] < min_x) min_x = m->vertices[i + 2];
+        if (m->vertices[i + 2] > max_x) max_x = m->vertices[i + 2];
+    }
+
+    if (origin_z) *origin_z = min_z;
+    if (origin_y) *origin_y = min_y;
+    if (origin_x) *origin_x = min_x;
+
+    if (length_z) *length_z = max_z - min_z;
+    if (length_y) *length_y = max_y - min_y;
+    if (length_x) *length_x = max_x - min_x;
+}
+
+PUBLIC void mesh_translate(mesh *m, float z, float y, float x) {
+    if (!m || !m->vertices || m->vertex_count <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < m->vertex_count * 3; i += 3) {
+        m->vertices[i]     += z;  // Z
+        m->vertices[i + 1] += y;  // Y
+        m->vertices[i + 2] += x;  // X
+    }
+}
+
+PUBLIC void mesh_scale(mesh *m, float scale_z, float scale_y, float scale_x) {
+    if (!m || !m->vertices || m->vertex_count <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < m->vertex_count * 3; i += 3) {
+        m->vertices[i]     *= scale_z;  // Z
+        m->vertices[i + 1] *= scale_y;  // Y
+        m->vertices[i + 2] *= scale_x;  // X
+    }
+
+    // If normals are present, we need to renormalize them after non-uniform scaling
+    if (m->normals) {
+        for (int i = 0; i < m->vertex_count * 3; i += 3) {
+            // Scale the normal vector
+            float nz = m->normals[i]     * scale_z;
+            float ny = m->normals[i + 1] * scale_y;
+            float nx = m->normals[i + 2] * scale_x;
+
+            // Calculate length for normalization
+            float length = sqrtf(nz * nz + ny * ny + nx * nx);
+
+            // Avoid division by zero
+            if (length > 0.0001f) {
+                m->normals[i]     = nz / length;
+                m->normals[i + 1] = ny / length;
+                m->normals[i + 2] = nx / length;
+            }
+        }
     }
 }
 

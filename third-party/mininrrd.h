@@ -30,10 +30,6 @@ typedef struct {
     bool is_valid;
 } nrrd_t;
 
-
-
-
-
 PRIVATE bool parse_sizes(char* value, nrrd_t* nrrd) {
     char* token = strtok(value, " ");
     int i = 0;

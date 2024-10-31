@@ -24,8 +24,11 @@ include_directories(. third-party/)
 add_executable(volcanotest
     examples/runtests.c
 )
+target_compile_definitions(volcanotest PUBLIC MINILIBS_HEADER_ONLY)
 
-add_executable(volcano examples/volcano_example.c )
+
+add_executable(volcano examples/example2.c )
+target_compile_definitions(volcano PUBLIC MINILIBS_HEADER_ONLY)
 
 
 

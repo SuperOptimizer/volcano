@@ -479,3 +479,188 @@ PRIVATE uint16_t getTIFFPixel16FromBuffer(const uint16_t* buffer, int y, int x, 
 PRIVATE uint8_t getTIFFPixel8FromBuffer(const uint8_t* buffer, int y, int x, int width) {
     return buffer[y * width + x];
 }
+
+
+PRIVATE void writeBytes(FILE* fp, uint32_t value, int count, int littleEndian) {
+    if (littleEndian) {
+        for (int i = 0; i < count; i++) {
+            uint8_t byte = (value >> (i * 8)) & 0xFF;
+            fwrite(&byte, 1, 1, fp);
+        }
+    } else {
+        for (int i = count - 1; i >= 0; i--) {
+            uint8_t byte = (value >> (i * 8)) & 0xFF;
+            fwrite(&byte, 1, 1, fp);
+        }
+    }
+}
+
+PRIVATE void writeString(FILE* fp, const char* str, uint32_t offset) {
+    fseek(fp, offset, SEEK_SET);
+    size_t len = strlen(str);
+    fwrite(str, 1, len + 1, fp);  // Include null terminator
+}
+
+PRIVATE void writeRational(FILE* fp, float value, uint32_t offset, int littleEndian) {
+    fseek(fp, offset, SEEK_SET);
+    uint32_t numerator = (uint32_t)(value * 1000);
+    uint32_t denominator = 1000;
+    writeBytes(fp, numerator, 4, littleEndian);
+    writeBytes(fp, denominator, 4, littleEndian);
+}
+
+PRIVATE void getCurrentDateTime(char* dateTime) {
+    time_t now;
+    struct tm* timeinfo;
+    time(&now);
+    timeinfo = localtime(&now);
+    strftime(dateTime, 20, "%Y:%m:%d %H:%M:%S", timeinfo);
+}
+
+PRIVATE uint32_t writeIFDEntry(FILE* fp, uint16_t tag, uint16_t type, uint32_t count,
+                             uint32_t value, int littleEndian) {
+    writeBytes(fp, tag, 2, littleEndian);
+    writeBytes(fp, type, 2, littleEndian);
+    writeBytes(fp, count, 4, littleEndian);
+    writeBytes(fp, value, 4, littleEndian);
+    return 12;  // Size of IFD entry
+}
+
+PUBLIC int writeTIFF(const char* filename, const TiffImage* img, bool littleEndian) {
+    if (!img || !img->directories || !img->data || !img->isValid) return 1;
+
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) return 1;
+
+    // Write header
+    writeBytes(fp, littleEndian ? 0x4949 : 0x4D4D, 2, 1);  // Byte order marker
+    writeBytes(fp, 42, 2, littleEndian);                    // TIFF version
+
+    uint32_t ifdOffset = 8;  // Start first IFD after header
+    writeBytes(fp, ifdOffset, 4, littleEndian);
+
+    // Calculate space needed for string and rational values
+    uint32_t extraDataOffset = ifdOffset;
+    for (int d = 0; d < img->depth; d++) {
+        extraDataOffset += 2 + (12 * 17) + 4;  // Directory entry count + entries + next IFD pointer
+    }
+
+    // Write each directory
+    for (int d = 0; d < img->depth; d++) {
+        const DirectoryInfo* dir = &img->directories[d];
+
+        // Position at IFD start
+        fseek(fp, ifdOffset, SEEK_SET);
+
+        // Write number of directory entries
+        writeBytes(fp, 17, 2, littleEndian);  // Number of IFD entries
+
+        // Write directory entries
+        writeIFDEntry(fp, TIFFTAG_SUBFILETYPE, TIFF_LONG, 1, dir->subfileType, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_IMAGEWIDTH, TIFF_LONG, 1, dir->width, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_IMAGELENGTH, TIFF_LONG, 1, dir->height, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_BITSPERSAMPLE, TIFF_SHORT, 1, dir->bitsPerSample, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_COMPRESSION, TIFF_SHORT, 1, dir->compression, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_PHOTOMETRIC, TIFF_SHORT, 1, dir->photometric, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_SAMPLESPERPIXEL, TIFF_SHORT, 1, dir->samplesPerPixel, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_ROWSPERSTRIP, TIFF_LONG, 1, dir->rowsPerStrip, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_PLANARCONFIG, TIFF_SHORT, 1, dir->planarConfig, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_SAMPLEFORMAT, TIFF_SHORT, 1, dir->sampleFormat, littleEndian);
+
+        // Write resolution entries
+        writeIFDEntry(fp, TIFFTAG_XRESOLUTION, TIFF_RATIONAL, 1, extraDataOffset, littleEndian);
+        writeRational(fp, dir->xResolution, extraDataOffset, littleEndian);
+        extraDataOffset += 8;
+
+        writeIFDEntry(fp, TIFFTAG_YRESOLUTION, TIFF_RATIONAL, 1, extraDataOffset, littleEndian);
+        writeRational(fp, dir->yResolution, extraDataOffset, littleEndian);
+        extraDataOffset += 8;
+
+        writeIFDEntry(fp, TIFFTAG_RESOLUTIONUNIT, TIFF_SHORT, 1, dir->resolutionUnit, littleEndian);
+
+        // Write metadata strings if present
+        if (dir->imageDescription[0]) {
+            size_t len = strlen(dir->imageDescription) + 1;
+            writeIFDEntry(fp, TIFFTAG_IMAGEDESCRIPTION, TIFF_ASCII, len, extraDataOffset, littleEndian);
+            writeString(fp, dir->imageDescription, extraDataOffset);
+            extraDataOffset += len;
+        }
+
+        if (dir->software[0]) {
+            size_t len = strlen(dir->software) + 1;
+            writeIFDEntry(fp, TIFFTAG_SOFTWARE, TIFF_ASCII, len, extraDataOffset, littleEndian);
+            writeString(fp, dir->software, extraDataOffset);
+            extraDataOffset += len;
+        }
+
+        if (dir->dateTime[0]) {
+            writeIFDEntry(fp, TIFFTAG_DATETIME, TIFF_ASCII, 20, extraDataOffset, littleEndian);
+            writeString(fp, dir->dateTime, extraDataOffset);
+            extraDataOffset += 20;
+        }
+
+        // Calculate strip size and write strip information
+        size_t stripSize = dir->width * dir->height * (dir->bitsPerSample / 8);
+        writeIFDEntry(fp, TIFFTAG_STRIPOFFSETS, TIFF_LONG, 1, extraDataOffset, littleEndian);
+        writeIFDEntry(fp, TIFFTAG_STRIPBYTECOUNTS, TIFF_LONG, 1, stripSize, littleEndian);
+
+        // Write image data
+        fseek(fp, extraDataOffset, SEEK_SET);
+        size_t offset = stripSize * d;
+        fwrite((uint8_t*)img->data + offset, 1, stripSize, fp);
+        extraDataOffset += stripSize;
+
+        // Write next IFD offset or 0 if last directory
+        uint32_t nextIFD = (d < img->depth - 1) ? extraDataOffset : 0;
+        writeBytes(fp, nextIFD, 4, littleEndian);
+
+        ifdOffset = nextIFD;
+    }
+
+    fclose(fp);
+    return 0;
+}
+
+PUBLIC TiffImage* createTIFF(uint32_t width, uint32_t height, uint16_t depth,
+                           uint16_t bitsPerSample) {
+    TiffImage* img = calloc(1, sizeof(TiffImage));
+    if (!img) return NULL;
+
+    img->depth = depth;
+    img->directories = calloc(depth, sizeof(DirectoryInfo));
+    if (!img->directories) {
+        free(img);
+        return NULL;
+    }
+
+    img->dataSize = width * height * (bitsPerSample / 8) * depth;
+    img->data = calloc(1, img->dataSize);
+    if (!img->data) {
+        free(img->directories);
+        free(img);
+        return NULL;
+    }
+
+    // Initialize each directory
+    for (int i = 0; i < depth; i++) {
+        DirectoryInfo* dir = &img->directories[i];
+        dir->width = width;
+        dir->height = height;
+        dir->bitsPerSample = bitsPerSample;
+        dir->compression = 1;  // No compression
+        dir->photometric = 1;  // min-is-black
+        dir->samplesPerPixel = 1;
+        dir->rowsPerStrip = height;
+        dir->planarConfig = 1;
+        dir->sampleFormat = 1;  // unsigned integer
+        dir->xResolution = 72.0f;
+        dir->yResolution = 72.0f;
+        dir->resolutionUnit = 2;  // ?
+        dir->subfileType = 0;
+
+        getCurrentDateTime(dir->dateTime);
+    }
+
+    img->isValid = true;
+    return img;
+}

@@ -62,7 +62,10 @@ PUBLIC chunk* volume_get_chunk(volume* vol, s32 chunk_pos[static 3], s32 chunk_d
 
   long len = download(url, &buf);
   printf("len %d\n",(s32)len);
-  //assert(len == 250073508 );
+  //todo: is this applicable for all of our 3d tiff files from the data server?
+  if (len != 250073508 ) {
+    printf("warning! did not downloaod the seemingly correct length from %s\n",url);
+  }
 
   if (vol->cache_dir != NULL) {
     char outpath[1024] = {'\0'};
@@ -73,7 +76,7 @@ PUBLIC chunk* volume_get_chunk(volume* vol, s32 chunk_pos[static 3], s32 chunk_d
       printf("could not open %s for writing\n",outpath);
       return NULL;
     }
-    size_t sz = fwrite(buf, len, 1, fp);
+    size_t sz = fwrite(buf, 1, len, fp);
     printf("wrote: %lld bytes to %s\n",sz, outpath);
     if (sz != len) {
       printf("could not write all data to %s\n",outpath);

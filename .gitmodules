@@ -1,18 +1,6 @@
-[submodule "third-party/stb"]
-	path = third-party/stb
-	url = https://github.com/nothings/stb.git
-[submodule "third-party/miniz"]
-	path = third-party/miniz
-	url = https://github.com/richgel999/miniz.git
 [submodule "third-party/json.h"]
 	path = third-party/json.h
 	url = https://github.com/sheredom/json.h.git
-[submodule "third-party/curl"]
-	path = third-party/curl
-	url = https://github.com/curl/curl.git
-[submodule "third-party/BearSSL"]
-	path = third-party/BearSSL
-	url = https://www.bearssl.org/git/BearSSL
-[submodule "third-party/c-blosc2"]
-	path = third-party/c-blosc2
-	url = https://github.com/Blosc/c-blosc2.git
+[submodule "third-party/vesuvius-c"]
+	path = third-party/vesuvius-c
+	url = https://github.com/SuperOptimizer/vesuvius-c.git

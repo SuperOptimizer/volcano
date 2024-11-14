@@ -35,7 +35,6 @@ SOFTWARE.
 #include <stdint.h>
 #include <time.h>
 
-#include "minilibs.h"
 
 
 // HEAP ////////////////////////////////////////////////////////////////////////
@@ -69,15 +68,15 @@ typedef struct Heap {
     heap->nodes[i] = tmp; \
   }
 
-PRIVATE Heap heap_alloc(int size) {
+static inline Heap heap_alloc(int size) {
   return (Heap){.len = 0, .size = size, .nodes = (HeapNode*)calloc(size*2+1, sizeof(HeapNode))};
 }
 
-PRIVATE void heap_free(Heap *heap) {
+static inline void heap_free(Heap *heap) {
   free(heap->nodes);
 }
 
-PRIVATE void heap_push(Heap *heap, HeapNode node) {
+static inline void heap_push(Heap *heap, HeapNode node) {
   //assert(heap->len <= heap->size);
 
   heap->len++;
@@ -88,7 +87,7 @@ PRIVATE void heap_push(Heap *heap, HeapNode node) {
   }
 }
 
-PRIVATE HeapNode heap_pop(Heap *heap) {
+static inline HeapNode heap_pop(Heap *heap) {
   //assert(heap->len > 0);
 
   HeapNode node = heap->nodes[1];
@@ -133,11 +132,11 @@ typedef struct Superpixel {
   u32 neighs[SUPERPIXEL_MAX_NEIGHS];
 } Superpixel;
 
-PUBLIC int snic_superpixel_max_neighs()  {
+int snic_superpixel_max_neighs()  {
   return SUPERPIXEL_MAX_NEIGHS;
 }
 
-PUBLIC int superpixel_add_neighbors(Superpixel *superpixels, u32 k1, u32 k2) {
+int superpixel_add_neighbors(Superpixel *superpixels, u32 k1, u32 k2) {
   int i = 0;
   for (; i < SUPERPIXEL_MAX_NEIGHS; i++) {
     if (superpixels[k1].neighs[i] == 0) {
@@ -150,7 +149,7 @@ PUBLIC int superpixel_add_neighbors(Superpixel *superpixels, u32 k1, u32 k2) {
   return 1;
 }
 
-PUBLIC int snic_superpixel_count(int lx, int ly, int lz, int d_seed)  {
+int snic_superpixel_count(int lx, int ly, int lz, int d_seed)  {
   int cz = (lz - d_seed/2 + d_seed - 1)/d_seed;
   int cy = (ly - d_seed/2 + d_seed - 1)/d_seed;
   int cx = (lx - d_seed/2 + d_seed - 1)/d_seed;
@@ -158,7 +157,7 @@ PUBLIC int snic_superpixel_count(int lx, int ly, int lz, int d_seed)  {
 }
 
 // The labels must be the same size as img, and all zeros.
-PUBLIC int snic(f32 *img, int lz, int ly, int lx, int d_seed, f32 compactness, f32 lowmid, f32 midhig, u32 *labels, Superpixel* superpixels) {
+int snic(f32 *img, int lz, int ly, int lx, int d_seed, f32 compactness, f32 lowmid, f32 midhig, u32 *labels, Superpixel* superpixels) {
   int neigh_overflow = 0; // Number of neighbors that couldn't be added.
   int lylx = ly * lx;
   int img_size = lylx * lz;

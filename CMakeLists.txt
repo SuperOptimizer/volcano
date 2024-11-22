@@ -21,6 +21,7 @@ include_directories(third-party/json.h third-party/vesuvius-c third-party)
 
 find_package(Blosc2 REQUIRED)
 find_package(CURL REQUIRED)
+find_package(JsonC REQUIRED)
 
 add_compile_options(-g3 -Wall -Wextra)
 if(UNIX)
@@ -49,3 +50,8 @@ else()
 endif()
 
 
+if(JSONC_FOUND)
+  target_link_libraries(volcano PUBLIC JsonC::JsonC)
+else()
+  message(FATAL_ERROR "json-c not found, please install json-c: https://github.com/json-c/json-c")
+endif()

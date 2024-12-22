@@ -186,6 +186,37 @@ static int get_cell_index(const VolumeTracker* tracker, const int* indices) {
            indices[2] * tracker->cells_per_dim * tracker->cells_per_dim;
 }
 
+
+// Get the strongest connection direction
+static void get_strongest_connection_dir(const SuperpixelConnections* connections,
+                                       int current,
+                                       const Superpixel* superpixels,
+                                       float* strong_dir) {
+    float max_strength = 0.0f;
+    float best_dir[NUM_DIMENSIONS] = {0};
+
+    for (int i = 0; i < connections[current].num_connections; i++) {
+        float strength = connections[current].connections[i].connection_strength;
+        if (strength > max_strength) {
+            int neighbor = connections[current].connections[i].neighbor_label;
+            float dp[NUM_DIMENSIONS] = {
+                superpixels[neighbor].z - superpixels[current].z,
+                superpixels[neighbor].y - superpixels[current].y,
+                superpixels[neighbor].x - superpixels[current].x
+            };
+            float mag = vector_magnitude(dp);
+            if (mag > 0.001f) {
+                max_strength = strength;
+                for (int j = 0; j < NUM_DIMENSIONS; j++) {
+                    best_dir[j] = dp[j] / mag;
+                }
+            }
+        }
+    }
+
+    memcpy(strong_dir, best_dir, NUM_DIMENSIONS * sizeof(float));
+}
+
 // Initialize volume tracker
 static VolumeTracker* create_volume_tracker(float bounds[NUM_DIMENSIONS][2]) {
     VolumeTracker* tracker = malloc(sizeof(VolumeTracker));
@@ -366,14 +397,29 @@ static int* select_start_points(const Superpixel* superpixels,
     return starts;
 }
 
-// Enhanced grow_chord function
+// Add validation for superpixel indices
+static bool is_valid_superpixel(int index, int max_index) {
+    return index > 0 && index <= max_index;  // 1-based indexing validation
+}
+
 static Chord grow_single_chord(int start_point,
                              const Superpixel* superpixels,
                              const SuperpixelConnections* connections,
                              bool* available,
                              VolumeTracker* tracker,
                              float bounds[NUM_DIMENSIONS][2],
-                             int axis) {
+                             int axis,
+                             int num_superpixels) {  // Add num_superpixels parameter for validation
+    // Validate start point
+    if (!is_valid_superpixel(start_point, num_superpixels)) {
+        Chord empty = {0};
+        empty.points = malloc(sizeof(uint32_t));
+        empty.positions = malloc(NUM_DIMENSIONS * sizeof(float));
+        empty.recent_dirs = malloc(MAX_RECENT_DIRS * NUM_DIMENSIONS * sizeof(float));
+        empty.point_count = 0;
+        return empty;
+    }
+
     Chord chord = {0};
     chord.points = malloc(MAX_CHORD_LENGTH * sizeof(uint32_t));
     chord.positions = malloc(MAX_CHORD_LENGTH * NUM_DIMENSIONS * sizeof(float));
@@ -397,10 +443,8 @@ static Chord grow_single_chord(int start_point,
     // Grow in both directions
     for (int direction = -1; direction <= 1; direction += 2) {
         if (direction > 0) {
-            // For positive direction, start from where we are
             temp_count = 0;
         } else {
-            // For negative direction, copy existing points to temp buffer in reverse
             for (int i = 0; i < chord.point_count; i++) {
                 temp_points[i] = chord.points[chord.point_count - 1 - i];
                 memcpy(&temp_positions[i * NUM_DIMENSIONS],
@@ -411,6 +455,8 @@ static Chord grow_single_chord(int start_point,
         }
 
         int current = direction > 0 ? chord.points[chord.point_count - 1] : start_point;
+        if (!is_valid_superpixel(current, num_superpixels)) break;
+
         float current_pos[3] = {superpixels[current].z,
                                superpixels[current].y,
                                superpixels[current].x};
@@ -421,12 +467,19 @@ static Chord grow_single_chord(int start_point,
             float best_dir[NUM_DIMENSIONS];
             float best_next_pos[NUM_DIMENSIONS];
 
+            // Get strongest connection direction
+            float strong_dir[NUM_DIMENSIONS];
+            get_strongest_connection_dir(connections, current, superpixels, strong_dir);
+
             // Check all connections
             for (int i = 0; i < connections[current].num_connections; i++) {
                 int next = connections[current].connections[i].neighbor_label;
-                float strength = connections[current].connections[i].connection_strength;
 
-                if (!available[next]) continue;
+                // Validate next superpixel index
+                if (!is_valid_superpixel(next, num_superpixels) || !available[next])
+                    continue;
+
+                float strength = connections[current].connections[i].connection_strength;
 
                 float next_pos[3] = {superpixels[next].z,
                                    superpixels[next].y,
@@ -436,17 +489,18 @@ static Chord grow_single_chord(int start_point,
                 vector_subtract(next_pos, current_pos, dp);
                 float dist = vector_magnitude(dp);
 
-                if (dist < 0.1f) continue;
+                if (dist < 0.01f) continue;
 
                 // Normalize direction
                 for (int j = 0; j < NUM_DIMENSIONS; j++) {
                     dp[j] /= dist;
                 }
 
-                // Calculate various scores
+                // Calculate axis progress - reduced threshold for longer chords
                 float axis_progress = direction * dp[axis];
-                if (axis_progress < PROGRESS_THRESHOLD) continue;
+                if (axis_progress < PROGRESS_THRESHOLD * 0.5f) continue;
 
+                // Calculate smoothness with more permissive threshold
                 float smoothness_score = 1.0f;
                 if (chord.num_recent_dirs > 0) {
                     float total_smooth = 0.0f;
@@ -455,15 +509,22 @@ static Chord grow_single_chord(int start_point,
                             &chord.recent_dirs[j * NUM_DIMENSIONS]);
                     }
                     smoothness_score = total_smooth / chord.num_recent_dirs;
-                    if (smoothness_score < SMOOTHNESS_THRESHOLD) continue;
+                    if (smoothness_score < SMOOTHNESS_THRESHOLD * 0.7f) continue;
                 }
 
+                // Calculate alignment with strongest connection direction
+                float connection_alignment = fabsf(vector_dot(dp, strong_dir));
+                if (isnan(connection_alignment)) connection_alignment = 0.5f;
+
+                // Get parallel score from volume tracker
                 float parallel_score = get_parallel_score(tracker, next_pos, dp);
 
+                // Calculate final score with adjusted weights to prioritize connection strength
                 float total_score =
-                    (strength / 255.0f) * 0.6f +
-                    axis_progress * 0.2f +
-                    parallel_score * 0.2f;
+                    (strength / 255.0f) * 0.6f +        // Increased weight for connection strength
+                    axis_progress * 0.2f +              // Moderate axis bias
+                    parallel_score * 0.1f +             // Light parallel influence
+                    connection_alignment * 0.1f;        // Reduced alignment influence
 
                 if (total_score > best_score) {
                     best_score = total_score;
@@ -473,7 +534,7 @@ static Chord grow_single_chord(int start_point,
                 }
             }
 
-            if (best_next < 0) break;
+            if (best_next < 0 || !is_valid_superpixel(best_next, num_superpixels)) break;
 
             // Add point to temp buffers
             temp_points[temp_count] = best_next;
@@ -504,7 +565,6 @@ static Chord grow_single_chord(int start_point,
 
         // Merge temp buffers into chord
         if (direction > 0) {
-            // Copy temp points to end of chord
             if (chord.point_count + temp_count <= MAX_CHORD_LENGTH) {
                 memcpy(&chord.points[chord.point_count],
                        temp_points,
@@ -515,7 +575,6 @@ static Chord grow_single_chord(int start_point,
                 chord.point_count += temp_count;
             }
         } else {
-            // Prepend temp points to chord
             if (chord.point_count + temp_count <= MAX_CHORD_LENGTH) {
                 memmove(&chord.points[temp_count],
                        chord.points,
@@ -569,7 +628,7 @@ Chord* grow_chords(const Superpixel* superpixels,
 
         Chord chord = grow_single_chord(start_points[i], superpixels,
                                       connections, available, tracker,
-                                      bounds, axis);
+                                      bounds, axis, num_superpixels);
 
         if (chord.point_count >= MIN_CHORD_LENGTH) {
             chords[valid_chords++] = chord;

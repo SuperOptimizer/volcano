@@ -122,3 +122,52 @@ float* segment_and_clean_f32(const float* volume, int depth, int height, int wid
 
     return result;
 }
+
+chunk *vs_avgpool_denoise(chunk *inchunk, s32 kernel) {
+    // Create output chunk with same dimensions as input
+    chunk *ret = vs_chunk_new(inchunk->dims);
+
+    // Calculate kernel half-size for centered window
+    s32 half = kernel / 2;
+
+    // Pre-allocate buffer for storing neighborhood values
+    s32 max_len = kernel * kernel * kernel;
+    f32 *data = malloc(max_len * sizeof(f32));
+
+    // Process each voxel in the volume
+    for (s32 z = 0; z < inchunk->dims[0]; z++) {
+        for (s32 y = 0; y < inchunk->dims[1]; y++) {
+            for (s32 x = 0; x < inchunk->dims[2]; x++) {
+                s32 count = 0;  // Track number of valid neighbors
+
+                // Gather values from kernel-sized neighborhood
+                for (s32 zi = -half; zi <= half; zi++) {
+                    for (s32 yi = -half; yi <= half; yi++) {
+                        for (s32 xi = -half; xi <= half; xi++) {
+                            // Calculate neighbor coordinates
+                            s32 nz = z + zi;
+                            s32 ny = y + yi;
+                            s32 nx = x + xi;
+
+                            // Skip if out of bounds
+                            if (nz < 0 || nz >= inchunk->dims[0] ||
+                                ny < 0 || ny >= inchunk->dims[1] ||
+                                nx < 0 || nx >= inchunk->dims[2]) {
+                                continue;
+                                }
+
+                            // Add valid neighbor to data array
+                            data[count++] = vs_chunk_get(inchunk, nz, ny, nx);
+                        }
+                    }
+                }
+
+                // Set output voxel to average of neighborhood
+                vs_chunk_set(ret, z, y, x, vs__avgfloat(data, count));
+            }
+        }
+    }
+
+    free(data);
+    return ret;
+}

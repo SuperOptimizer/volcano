@@ -45,7 +45,7 @@ int scroll_1a_unwrap() {
   for (int z = 2048; z < zmax-128; z+=dims[0]) {
     for (int y = 2048; y < ymax-128; y+=dims[1]) {
       for (int x = 2048; x < xmax-128; x+=dims[2]) {
-        constexpr u32 max_superpixels = (dims[0]/d_seed)*(dims[1]/d_seed)*(dims[2]/d_seed) + 1;
+        constexpr u32 max_superpixels = (dims[0]/d_seed)*(dims[1]/d_seed)*(dims[2]/d_seed);
         constexpr f32 bounds[NUM_DIMENSIONS][2] = {
           {0, (f32)dims[0]},
           {0, (f32)dims[1]},
@@ -82,11 +82,16 @@ int scroll_1a_unwrap() {
           goto cleanup;
         }
 
+        chunk* c = vs_avgpool_denoise(scrollchunk,3);
+        vs_chunk_free(scrollchunk);
+        scrollchunk = c;
+        c = nullptr;
+
         float* cleaned_volume = segment_and_clean_f32(
                     scrollchunk->data,
                     dims[0], dims[1], dims[2],
                     iso,
-                    iso + 128.0f);
+                    iso + 96.0f);
 
         memcpy(scrollchunk->data, cleaned_volume, dims[0] * dims[1] * dims[2] * sizeof(float));
         free(cleaned_volume);
@@ -113,10 +118,10 @@ int scroll_1a_unwrap() {
 
         chords = grow_chords(superpixels,
                       connections,
-                      snic_superpixel_count(),
+                      num_superpixels,
                       bounds,
                       0,          // 0 for z-axis, 1 for y-axis, 2 for x-axis
-                      4096,
+                      8192,
                       &num_chords);
 
         snprintf(csvpath, 1023, "%s/chords.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);

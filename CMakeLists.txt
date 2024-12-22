@@ -30,7 +30,7 @@ endif()
 
 # For some reason, when using _just_ link_libraries, no libraries are actually linked because ???
 # so just target_link_libraries for all executables
-target_link_libraries(volcano PUBLIC -lm -rdynamic)
+target_link_libraries(volcano PUBLIC -lm -rdynamic -lz)
 
 if(Blosc2_FOUND)
   message(STATUS "Found blosc2. Building with Zarr support")

@@ -10,28 +10,51 @@
 #define MIN_CHORD_LENGTH 8
 #define MAX_CHORD_LENGTH 128
 #define NUM_DIMENSIONS 3
+#define MAX_RECENT_DIRS 3
+#define NUM_LAYERS 256
+#define SMOOTHNESS_THRESHOLD 0.8f
+#define PROGRESS_THRESHOLD 0.5f
+#define MIN_CONNECTIONS 4
+#define KD_TREE_K 5
+#define KD_TREE_MAX_DIST 5.0f
+#define MAX_RECORDS_PER_CELL 32
 
 #include "snic.h"
 
-// Basic chord structure - just stores list of superpixels
+// Direction record for the volume tracker
+typedef struct DirectionRecord {
+    float pos[NUM_DIMENSIONS];
+    float dir[NUM_DIMENSIONS];
+    struct DirectionRecord* next;
+} DirectionRecord;
+
+// Cell in spatial grid
+typedef struct {
+    DirectionRecord* records;
+    int count;
+} SpatialCell;
+
+// Volume tracker to maintain parallelism between chords
+typedef struct {
+    DirectionRecord* records;
+    int num_records;
+    int capacity;
+    // Spatial grid
+    SpatialCell* cells;
+    int cells_per_dim;
+    float cell_size[NUM_DIMENSIONS];
+    float min_bounds[NUM_DIMENSIONS];
+} VolumeTracker;
+
+// Enhanced chord structure
 typedef struct {
     uint32_t* points;
     int point_count;
+    float* positions;
+    float* recent_dirs;
+    int num_recent_dirs;
 } Chord;
 
-// Active chord used during growth
-typedef struct {
-    Chord chord;          // The underlying chord being built
-    int front_idx;        // Current front superpixel index
-    int back_idx;         // Current back superpixel index
-    int axis;            // Growth axis
-    float front_pos[3];  // Current front position
-    float back_pos[3];   // Current back position
-    float front_dir[3];  // Current front direction
-    float back_dir[3];   // Current back direction
-    int grow_direction;  // 1 for positive, -1 for negative
-    bool is_active;      // Whether this chord is still growing
-} ActiveChord;
 
 // Helper functions for vector operations
 static inline void vector_subtract(const float* v1, const float* v2, float* result) {
@@ -56,179 +79,411 @@ static inline float vector_dot(const float* v1, const float* v2) {
     return sum;
 }
 
-static inline bool is_near_boundary(const float* pos, const float* min_bounds, const float* max_bounds) {
+// Quick sort implementation for percentile calculation
+static int partition(float* arr, int low, int high) {
+    float pivot = arr[high];
+    int i = (low - 1);
+
+    for (int j = low; j <= high - 1; j++) {
+        if (arr[j] <= pivot) {
+            i++;
+            float temp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = temp;
+        }
+    }
+    float temp = arr[i + 1];
+    arr[i + 1] = arr[high];
+    arr[high] = temp;
+    return (i + 1);
+}
+
+static void quicksort(float* arr, int low, int high) {
+    if (low < high) {
+        int pi = partition(arr, low, high);
+        quicksort(arr, low, pi - 1);
+        quicksort(arr, pi + 1, high);
+    }
+}
+
+// Calculate percentile value from array
+static float calculate_percentile(float* arr, int n, float percentile) {
+    quicksort(arr, 0, n - 1);
+    int index = (int)(percentile * n / 100.0f);
+    return arr[index];
+}
+
+// Get cell index for position
+static void get_cell_indices(const VolumeTracker* tracker, const float* pos, int* indices) {
     for (int i = 0; i < NUM_DIMENSIONS; i++) {
-        if (pos[i] < min_bounds[i] || pos[i] > max_bounds[i]) {
-            return true;
-        }
+        float relative_pos = pos[i] - tracker->min_bounds[i];
+        indices[i] = (int)(relative_pos / tracker->cell_size[i]);
+        if (indices[i] < 0) indices[i] = 0;
+        if (indices[i] >= tracker->cells_per_dim) indices[i] = tracker->cells_per_dim - 1;
     }
-    return false;
 }
 
-// Convert ActiveChord to basic Chord
-static Chord active_chord_to_chord(const ActiveChord* active) {
-    Chord chord;
-    chord.point_count = active->chord.point_count;
-    chord.points = malloc(chord.point_count * sizeof(uint32_t));
-    memcpy(chord.points, active->chord.points, chord.point_count * sizeof(uint32_t));
-    return chord;
+static int get_cell_index(const VolumeTracker* tracker, const int* indices) {
+    return indices[0] +
+           indices[1] * tracker->cells_per_dim +
+           indices[2] * tracker->cells_per_dim * tracker->cells_per_dim;
 }
 
-// Find next superpixel in chord
-bool find_best_next_superpixel(int current_idx,
-                              const float* current_pos,
-                              const float* current_dir,
-                              int target_axis,
-                              int direction,
-                              const Superpixel* superpixels,
-                              const SuperpixelConnections* connections,
-                              bool* available,
-                              const float* min_bounds,
-                              const float* max_bounds,
-                              int* best_idx,
-                              float* best_direction) {
+// Initialize volume tracker
+static VolumeTracker* create_volume_tracker(float bounds[NUM_DIMENSIONS][2]) {
+    VolumeTracker* tracker = malloc(sizeof(VolumeTracker));
 
-    float ideal_dir[NUM_DIMENSIONS] = {0};
-    ideal_dir[target_axis] = (float)direction;
+    // Initialize record storage
+    tracker->records = malloc(1024 * sizeof(DirectionRecord));
+    tracker->capacity = 1024;
+    tracker->num_records = 0;
 
-    float best_score = -INFINITY;
-    *best_idx = -1;
-    memset(best_direction, 0, NUM_DIMENSIONS * sizeof(float));
+    // Initialize spatial grid
+    tracker->cells_per_dim = 16;
+    int total_cells = tracker->cells_per_dim * tracker->cells_per_dim * tracker->cells_per_dim;
+    tracker->cells = calloc(total_cells, sizeof(SpatialCell));
 
-    const SuperpixelConnections* curr_connections = &connections[current_idx];
-    const float curr_pos[3] = {superpixels[current_idx].x,
-                              superpixels[current_idx].y,
-                              superpixels[current_idx].z};
-
-    // Check all connected superpixels
-    for (int i = 0; i < curr_connections->num_connections; i++) {
-        int next_idx = curr_connections->connections[i].neighbor_label;
-        float strength = curr_connections->connections[i].connection_strength;
-
-        if (!available[next_idx]) continue;
-
-        const float next_pos[3] = {superpixels[next_idx].x,
-                                  superpixels[next_idx].y,
-                                  superpixels[next_idx].z};
-
-        if (is_near_boundary(next_pos, min_bounds, max_bounds)) continue;
-
-        float dp[NUM_DIMENSIONS];
-        vector_subtract(next_pos, curr_pos, dp);
-        float dist = vector_magnitude(dp);
-
-        if (dist < 0.1f) continue;
-
-        // Normalize direction vector
-        for (int j = 0; j < NUM_DIMENSIONS; j++) {
-            dp[j] /= dist;
-        }
-
-        float progress = dp[target_axis] * direction;
-        if (progress < 0.3f) continue;  // Require significant progress
-
-        float alignment_score = vector_dot(dp, ideal_dir);
-        float score = alignment_score * strength;  // Weight by connection strength
-
-        if (score > best_score) {
-            best_score = score;
-            *best_idx = next_idx;
-            memcpy(best_direction, dp, NUM_DIMENSIONS * sizeof(float));
-        }
+    // Calculate cell sizes and bounds
+    for (int i = 0; i < NUM_DIMENSIONS; i++) {
+        tracker->min_bounds[i] = bounds[i][0];
+        tracker->cell_size[i] = (bounds[i][1] - bounds[i][0]) / tracker->cells_per_dim;
     }
 
-    return *best_idx >= 0;
+    return tracker;
 }
 
-// Grow single chord segment
-bool grow_chord_segment(ActiveChord* active,
-                      const Superpixel* superpixels,
-                      const SuperpixelConnections* connections,
-                      bool* available,
-                      const float* min_bounds,
-                      const float* max_bounds,
-                      int max_length) {
-
-    if (!active->is_active || active->chord.point_count >= max_length) {
-        active->is_active = false;
-        return false;
+// Add direction to tracker
+static void tracker_add_direction(VolumeTracker* tracker, const float* pos, const float* dir) {
+    // Expand storage if needed
+    if (tracker->num_records >= tracker->capacity) {
+        tracker->capacity *= 2;
+        tracker->records = realloc(tracker->records, tracker->capacity * sizeof(DirectionRecord));
     }
 
-    // Check overall progress
-    if (active->chord.point_count > 1) {
-        float first_pos[3] = {superpixels[active->chord.points[0]].x,
-                             superpixels[active->chord.points[0]].y,
-                             superpixels[active->chord.points[0]].z};
-        float front_pos[3] = {superpixels[active->front_idx].x,
-                             superpixels[active->front_idx].y,
-                             superpixels[active->front_idx].z};
-        float total_dp[NUM_DIMENSIONS];
-        vector_subtract(front_pos, first_pos, total_dp);
-        float total_dist = vector_magnitude(total_dp);
+    // Add to records
+    DirectionRecord* record = &tracker->records[tracker->num_records++];
+    memcpy(record->pos, pos, NUM_DIMENSIONS * sizeof(float));
+    memcpy(record->dir, dir, NUM_DIMENSIONS * sizeof(float));
 
-        if (total_dist > 0) {
-            float overall_progress = (total_dp[active->axis] * active->grow_direction) / total_dist;
-            if (overall_progress < 0.5f) {
-                active->is_active = false;
-                return false;
+    // Add to spatial grid
+    int indices[NUM_DIMENSIONS];
+    get_cell_indices(tracker, pos, indices);
+    int cell_idx = get_cell_index(tracker, indices);
+
+    // Add to cell if not full
+    SpatialCell* cell = &tracker->cells[cell_idx];
+    if (cell->count < MAX_RECORDS_PER_CELL) {
+        record->next = cell->records;
+        cell->records = record;
+        cell->count++;
+    }
+}
+
+// Get parallel score for proposed direction
+// Get parallel score for proposed direction
+static float get_parallel_score(VolumeTracker* tracker, const float* pos, const float* proposed_dir) {
+    if (tracker->num_records == 0) return 1.0f;
+
+    // Find cell and neighboring cells
+    int center_indices[NUM_DIMENSIONS];
+    get_cell_indices(tracker, pos, center_indices);
+
+    float total_alignment = 0.0f;
+    int count = 0;
+
+    // Check 3x3x3 neighborhood of cells
+    for (int dz = -1; dz <= 1 && count < KD_TREE_K; dz++) {
+        for (int dy = -1; dy <= 1 && count < KD_TREE_K; dy++) {
+            for (int dx = -1; dx <= 1 && count < KD_TREE_K; dx++) {
+                int indices[NUM_DIMENSIONS] = {
+                    center_indices[0] + dx,
+                    center_indices[1] + dy,
+                    center_indices[2] + dz
+                };
+
+                // Skip if outside grid
+                if (indices[0] < 0 || indices[0] >= tracker->cells_per_dim ||
+                    indices[1] < 0 || indices[1] >= tracker->cells_per_dim ||
+                    indices[2] < 0 || indices[2] >= tracker->cells_per_dim)
+                    continue;
+
+                int cell_idx = get_cell_index(tracker, indices);
+
+                // Verify cell index
+                if (cell_idx < 0 || cell_idx >= tracker->cells_per_dim * tracker->cells_per_dim * tracker->cells_per_dim)
+                    continue;
+
+                // Safety check the cell itself
+                if (!tracker->cells[cell_idx].records)
+                    continue;
+
+                DirectionRecord* record = tracker->cells[cell_idx].records;
+
+                // Check records in this cell
+                while (record && count < KD_TREE_K) {
+                    // Verify record is within our allocated records array
+                    if (record < tracker->records ||
+                        record >= tracker->records + tracker->num_records)
+                        break;
+
+                    float dp[NUM_DIMENSIONS] = {0};  // Initialize to zero
+                    vector_subtract(record->pos, pos, dp);
+                    float dist = vector_magnitude(dp);
+
+                    if (dist <= KD_TREE_MAX_DIST) {
+                        float alignment = fabsf(vector_dot(proposed_dir, record->dir));
+                        total_alignment += alignment;
+                        count++;
+                    }
+                    record = record->next;
+                }
             }
         }
     }
 
-    int next_idx;
-    float next_dir[NUM_DIMENSIONS];
-
-    if (!find_best_next_superpixel(active->front_idx,
-                                  active->front_pos,
-                                  active->front_dir,
-                                  active->axis,
-                                  active->grow_direction,
-                                  superpixels,
-                                  connections,
-                                  available,
-                                  min_bounds,
-                                  max_bounds,
-                                  &next_idx,
-                                  next_dir)) {
-        active->is_active = false;
-        return false;
-    }
-
-    // Resize points array if needed
-    if (active->chord.point_count >= max_length) {
-        int new_size = fmin(max_length * 2, MAX_CHORD_LENGTH);
-        uint32_t* new_points = realloc(active->chord.points, new_size * sizeof(uint32_t));
-        if (!new_points) {
-            active->is_active = false;
-            return false;
-        }
-        active->chord.points = new_points;
-    }
-
-    // Add new point
-    if (active->grow_direction > 0) {
-        active->chord.points[active->chord.point_count] = next_idx;
-    } else {
-        memmove(&active->chord.points[1], &active->chord.points[0],
-                active->chord.point_count * sizeof(uint32_t));
-        active->chord.points[0] = next_idx;
-    }
-
-    active->chord.point_count++;
-    available[next_idx] = false;
-
-    // Update active chord state
-    active->front_idx = next_idx;
-    float next_pos[3] = {superpixels[next_idx].x,
-                         superpixels[next_idx].y,
-                         superpixels[next_idx].z};
-    memcpy(active->front_pos, next_pos, NUM_DIMENSIONS * sizeof(float));
-    memcpy(active->front_dir, next_dir, NUM_DIMENSIONS * sizeof(float));
-
-    return true;
+    return count > 0 ? total_alignment / count : 1.0f;
 }
 
-// Main chord growing function - now returns array of basic Chords
+// Select start points for chord growth
+static int* select_start_points(const Superpixel* superpixels,
+                              const SuperpixelConnections* connections,
+                              int num_superpixels,
+                              float bounds[NUM_DIMENSIONS][2],
+                              int target_count,
+                              int axis,
+                              int* num_starts) {
+    float axis_min = bounds[axis][0];
+    float axis_max = bounds[axis][1];
+    float axis_step = (axis_max - axis_min) / NUM_LAYERS;
+    int points_per_layer = target_count / NUM_LAYERS;
+
+    // Allocate maximum possible size
+    int* starts = malloc(target_count * sizeof(int));
+    *num_starts = 0;
+
+    // Calculate intensity threshold (5th percentile)
+    float* intensities = malloc(num_superpixels * sizeof(float));
+    for (int i = 0; i < num_superpixels; i++) {
+        intensities[i] = superpixels[i].c;
+    }
+    float min_intensity = calculate_percentile(intensities, num_superpixels, 5.0f);
+    free(intensities);
+
+    // Select points for each layer
+    for (int layer = 0; layer < NUM_LAYERS; layer++) {
+        float layer_min = axis_min + layer * axis_step;
+        float layer_max = layer_min + axis_step;
+
+        // Find valid points in this layer
+        int* layer_points = malloc(num_superpixels * sizeof(int));
+        int num_layer_points = 0;
+
+        for (int i = 1; i <= num_superpixels; i++) {
+            float pos = axis == 0 ? superpixels[i].z :
+                       axis == 1 ? superpixels[i].y :
+                                 superpixels[i].x;
+
+            if (pos >= layer_min && pos < layer_max &&
+                superpixels[i].c > min_intensity &&
+                connections[i].num_connections >= MIN_CONNECTIONS) {
+                layer_points[num_layer_points++] = i;
+            }
+        }
+
+        // Randomly select points from this layer
+        if (num_layer_points > 0) {
+            int to_select = points_per_layer < num_layer_points ?
+                           points_per_layer : num_layer_points;
+
+            for (int i = 0; i < to_select; i++) {
+                int idx = rand() % num_layer_points;
+                starts[(*num_starts)++] = layer_points[idx];
+                // Swap with last element and reduce size
+                layer_points[idx] = layer_points[--num_layer_points];
+            }
+        }
+
+        free(layer_points);
+    }
+
+    return starts;
+}
+
+// Enhanced grow_chord function
+static Chord grow_single_chord(int start_point,
+                             const Superpixel* superpixels,
+                             const SuperpixelConnections* connections,
+                             bool* available,
+                             VolumeTracker* tracker,
+                             float bounds[NUM_DIMENSIONS][2],
+                             int axis) {
+    Chord chord = {0};
+    chord.points = malloc(MAX_CHORD_LENGTH * sizeof(uint32_t));
+    chord.positions = malloc(MAX_CHORD_LENGTH * NUM_DIMENSIONS * sizeof(float));
+    chord.recent_dirs = malloc(MAX_RECENT_DIRS * NUM_DIMENSIONS * sizeof(float));
+    chord.num_recent_dirs = 0;
+
+    // Add initial point
+    chord.points[0] = start_point;
+    float* start_pos = &chord.positions[0];
+    start_pos[0] = superpixels[start_point].z;
+    start_pos[1] = superpixels[start_point].y;
+    start_pos[2] = superpixels[start_point].x;
+    chord.point_count = 1;
+    available[start_point] = false;
+
+    // Create buffers for temporary growth in each direction
+    uint32_t* temp_points = malloc(MAX_CHORD_LENGTH * sizeof(uint32_t));
+    float* temp_positions = malloc(MAX_CHORD_LENGTH * NUM_DIMENSIONS * sizeof(float));
+    int temp_count = 0;
+
+    // Grow in both directions
+    for (int direction = -1; direction <= 1; direction += 2) {
+        if (direction > 0) {
+            // For positive direction, start from where we are
+            temp_count = 0;
+        } else {
+            // For negative direction, copy existing points to temp buffer in reverse
+            for (int i = 0; i < chord.point_count; i++) {
+                temp_points[i] = chord.points[chord.point_count - 1 - i];
+                memcpy(&temp_positions[i * NUM_DIMENSIONS],
+                       &chord.positions[(chord.point_count - 1 - i) * NUM_DIMENSIONS],
+                       NUM_DIMENSIONS * sizeof(float));
+            }
+            temp_count = chord.point_count;
+        }
+
+        int current = direction > 0 ? chord.points[chord.point_count - 1] : start_point;
+        float current_pos[3] = {superpixels[current].z,
+                               superpixels[current].y,
+                               superpixels[current].x};
+
+        while (temp_count < MAX_CHORD_LENGTH) {
+            float best_score = -INFINITY;
+            int best_next = -1;
+            float best_dir[NUM_DIMENSIONS];
+            float best_next_pos[NUM_DIMENSIONS];
+
+            // Check all connections
+            for (int i = 0; i < connections[current].num_connections; i++) {
+                int next = connections[current].connections[i].neighbor_label;
+                float strength = connections[current].connections[i].connection_strength;
+
+                if (!available[next]) continue;
+
+                float next_pos[3] = {superpixels[next].z,
+                                   superpixels[next].y,
+                                   superpixels[next].x};
+
+                float dp[NUM_DIMENSIONS];
+                vector_subtract(next_pos, current_pos, dp);
+                float dist = vector_magnitude(dp);
+
+                if (dist < 0.1f) continue;
+
+                // Normalize direction
+                for (int j = 0; j < NUM_DIMENSIONS; j++) {
+                    dp[j] /= dist;
+                }
+
+                // Calculate various scores
+                float axis_progress = direction * dp[axis];
+                if (axis_progress < PROGRESS_THRESHOLD) continue;
+
+                float smoothness_score = 1.0f;
+                if (chord.num_recent_dirs > 0) {
+                    float total_smooth = 0.0f;
+                    for (int j = 0; j < chord.num_recent_dirs; j++) {
+                        total_smooth += vector_dot(dp,
+                            &chord.recent_dirs[j * NUM_DIMENSIONS]);
+                    }
+                    smoothness_score = total_smooth / chord.num_recent_dirs;
+                    if (smoothness_score < SMOOTHNESS_THRESHOLD) continue;
+                }
+
+                float parallel_score = get_parallel_score(tracker, next_pos, dp);
+
+                float total_score =
+                    (strength / 255.0f) * 0.6f +
+                    axis_progress * 0.2f +
+                    parallel_score * 0.2f;
+
+                if (total_score > best_score) {
+                    best_score = total_score;
+                    best_next = next;
+                    memcpy(best_dir, dp, NUM_DIMENSIONS * sizeof(float));
+                    memcpy(best_next_pos, next_pos, NUM_DIMENSIONS * sizeof(float));
+                }
+            }
+
+            if (best_next < 0) break;
+
+            // Add point to temp buffers
+            temp_points[temp_count] = best_next;
+            memcpy(&temp_positions[temp_count * NUM_DIMENSIONS],
+                   best_next_pos,
+                   NUM_DIMENSIONS * sizeof(float));
+            temp_count++;
+
+            // Update recent directions
+            if (chord.num_recent_dirs < MAX_RECENT_DIRS) {
+                memcpy(&chord.recent_dirs[chord.num_recent_dirs * NUM_DIMENSIONS],
+                       best_dir, NUM_DIMENSIONS * sizeof(float));
+                chord.num_recent_dirs++;
+            } else {
+                memmove(chord.recent_dirs,
+                        &chord.recent_dirs[NUM_DIMENSIONS],
+                        (MAX_RECENT_DIRS - 1) * NUM_DIMENSIONS * sizeof(float));
+                memcpy(&chord.recent_dirs[(MAX_RECENT_DIRS - 1) * NUM_DIMENSIONS],
+                       best_dir, NUM_DIMENSIONS * sizeof(float));
+            }
+
+            available[best_next] = false;
+            tracker_add_direction(tracker, best_next_pos, best_dir);
+
+            current = best_next;
+            memcpy(current_pos, best_next_pos, NUM_DIMENSIONS * sizeof(float));
+        }
+
+        // Merge temp buffers into chord
+        if (direction > 0) {
+            // Copy temp points to end of chord
+            if (chord.point_count + temp_count <= MAX_CHORD_LENGTH) {
+                memcpy(&chord.points[chord.point_count],
+                       temp_points,
+                       temp_count * sizeof(uint32_t));
+                memcpy(&chord.positions[chord.point_count * NUM_DIMENSIONS],
+                       temp_positions,
+                       temp_count * NUM_DIMENSIONS * sizeof(float));
+                chord.point_count += temp_count;
+            }
+        } else {
+            // Prepend temp points to chord
+            if (chord.point_count + temp_count <= MAX_CHORD_LENGTH) {
+                memmove(&chord.points[temp_count],
+                       chord.points,
+                       chord.point_count * sizeof(uint32_t));
+                memmove(&chord.positions[temp_count * NUM_DIMENSIONS],
+                       chord.positions,
+                       chord.point_count * NUM_DIMENSIONS * sizeof(float));
+
+                memcpy(chord.points,
+                       temp_points,
+                       temp_count * sizeof(uint32_t));
+                memcpy(chord.positions,
+                       temp_positions,
+                       temp_count * NUM_DIMENSIONS * sizeof(float));
+                chord.point_count += temp_count;
+            }
+        }
+    }
+
+    free(temp_points);
+    free(temp_positions);
+    return chord;
+}
+
+// Main chord growing function
 Chord* grow_chords(const Superpixel* superpixels,
                   const SuperpixelConnections* connections,
                   int num_superpixels,
@@ -236,98 +491,60 @@ Chord* grow_chords(const Superpixel* superpixels,
                   int axis,
                   int num_paths,
                   int* num_chords_out) {
-
     // Initialize working space
-    bool* available = calloc(num_superpixels, sizeof(bool));
-    memset(available, true, num_superpixels * sizeof(bool));
+    bool* available = calloc(num_superpixels + 1, sizeof(bool));
+    memset(available, true, (num_superpixels + 1) * sizeof(bool));
 
-    float min_bounds[NUM_DIMENSIONS];
-    float max_bounds[NUM_DIMENSIONS];
-    for (int i = 0; i < NUM_DIMENSIONS; i++) {
-        min_bounds[i] = bounds[i][0] + 0.1f;
-        max_bounds[i] = bounds[i][1] - 0.2f;
-    }
+    VolumeTracker* tracker = create_volume_tracker(bounds);
 
-    // Initialize active chords
-    int chords_per_direction = num_paths / 2;
-    ActiveChord* active_chords = calloc(num_paths, sizeof(ActiveChord));
-    int num_active_chords = 0;
+    // Select start points
+    int num_starts;
+    int* start_points = select_start_points(superpixels, connections,
+                                          num_superpixels, bounds,
+                                          num_paths, axis, &num_starts);
 
-    // Seed paths in both directions
-    for (int dir = -1; dir <= 1; dir += 2) {
-        for (int i = 0; i < chords_per_direction; i++) {
-            // Find valid seed superpixel
-            int seed_idx = rand() % num_superpixels;
-            if (!available[seed_idx]) continue;
+    // Grow chords from each start point
+    Chord* chords = malloc(num_starts * sizeof(Chord));
+    int valid_chords = 0;
 
-            ActiveChord* active = &active_chords[num_active_chords++];
-            active->chord.points = malloc(100 * sizeof(uint32_t));
-            active->chord.point_count = 1;
-            active->front_idx = seed_idx;
-            active->back_idx = seed_idx;
-            active->axis = axis;
-            active->grow_direction = dir;
-            active->is_active = true;
+    for (int i = 0; i < num_starts; i++) {
+        if (!available[start_points[i]]) continue;
 
-            float seed_pos[3] = {superpixels[seed_idx].x,
-                                superpixels[seed_idx].y,
-                                superpixels[seed_idx].z};
-            memcpy(active->front_pos, seed_pos, NUM_DIMENSIONS * sizeof(float));
-            memcpy(active->back_pos, seed_pos, NUM_DIMENSIONS * sizeof(float));
+        Chord chord = grow_single_chord(start_points[i], superpixels,
+                                      connections, available, tracker,
+                                      bounds, axis);
 
-            float ideal_dir[NUM_DIMENSIONS] = {0};
-            ideal_dir[axis] = dir;
-            memcpy(active->front_dir, ideal_dir, NUM_DIMENSIONS * sizeof(float));
-            memcpy(active->back_dir, ideal_dir, NUM_DIMENSIONS * sizeof(float));
-
-            active->chord.points[0] = seed_idx;
-            available[seed_idx] = false;
+        if (chord.point_count >= MIN_CHORD_LENGTH) {
+            chords[valid_chords++] = chord;
+        } else {
+            free(chord.points);
+            free(chord.positions);
+            free(chord.recent_dirs);
         }
     }
 
-    // Growth phase
-    bool any_growth;
-    do {
-        any_growth = false;
-        for (int i = 0; i < num_active_chords; i++) {
-            if (active_chords[i].is_active) {
-                any_growth |= grow_chord_segment(&active_chords[i],
-                                              superpixels,
-                                              connections,
-                                              available,
-                                              min_bounds,
-                                              max_bounds,
-                                              MAX_CHORD_LENGTH);
-            }
-        }
-    } while (any_growth);
+    // Create final chord array of exact size needed
+    Chord* final_chords = malloc(valid_chords * sizeof(Chord));
+    memcpy(final_chords, chords, valid_chords * sizeof(Chord));
 
-    // Count valid chords
-    int valid_chord_count = 0;
-    for (int i = 0; i < num_active_chords; i++) {
-        if (active_chords[i].chord.point_count >= MIN_CHORD_LENGTH) {
-            valid_chord_count++;
-        }
-    }
-
-    // Create output array of basic Chords
-    Chord* result_chords = calloc(valid_chord_count, sizeof(Chord));
-    int result_idx = 0;
-
-    for (int i = 0; i < num_active_chords; i++) {
-        if (active_chords[i].chord.point_count >= MIN_CHORD_LENGTH) {
-            result_chords[result_idx] = active_chord_to_chord(&active_chords[i]);
-            result_idx++;
-        }
-    }
-
-    // Cleanup temporary arrays but not the result
-    for (int i = 0; i < num_active_chords; i++) {
-        free(active_chords[i].chord.points);
-    }
-    free(active_chords);
+    // Cleanup
+    free(chords);
+    free(start_points);
     free(available);
-    
-    *num_chords_out = valid_chord_count;
-    return result_chords;
+    free(tracker->records);
+    free(tracker->cells);
+    free(tracker);
+
+    *num_chords_out = valid_chords;
+    return final_chords;
+}
+
+// Helper function to free chord memory
+void free_chords(Chord* chords, int num_chords) {
+    for (int i = 0; i < num_chords; i++) {
+        free(chords[i].points);
+        free(chords[i].positions);
+        free(chords[i].recent_dirs);
+    }
+    free(chords);
 }

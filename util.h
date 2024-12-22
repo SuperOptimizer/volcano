@@ -3,9 +3,235 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 #include "volcano.h"
 #include "snic.h"
 #include "chord.h"
+
+#define ZLIB_CHUNK_SIZE 16384
+
+// Helper function to compress a string using zlib
+static int compress_string(const char* input, size_t input_len, char** output, size_t* output_len) {
+    z_stream strm;
+    char out[ZLIB_CHUNK_SIZE];
+    char* compressed = NULL;
+    size_t total_size = 0;
+
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    if (deflateInit2(&strm, Z_BEST_COMPRESSION, Z_DEFLATED, 31, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        return -1;
+    }
+
+    strm.avail_in = input_len;
+    strm.next_in = (unsigned char*)input;
+
+    do {
+        strm.avail_out = ZLIB_CHUNK_SIZE;
+        strm.next_out = (unsigned char*)out;
+
+        if (deflate(&strm, Z_FINISH) == Z_STREAM_ERROR) {
+            deflateEnd(&strm);
+            free(compressed);
+            return -1;
+        }
+
+        size_t have = ZLIB_CHUNK_SIZE - strm.avail_out;
+        char* new_compressed = realloc(compressed, total_size + have);
+        if (!new_compressed) {
+            deflateEnd(&strm);
+            free(compressed);
+            return -1;
+        }
+        compressed = new_compressed;
+        memcpy(compressed + total_size, out, have);
+        total_size += have;
+    } while (strm.avail_out == 0);
+
+    deflateEnd(&strm);
+    *output = compressed;
+    *output_len = total_size;
+    return 0;
+}
+
+// Helper function to decompress a string using zlib
+static int decompress_string(const char* input, size_t input_len, char** output, size_t* output_len) {
+    z_stream strm;
+    char out[ZLIB_CHUNK_SIZE];
+    char* decompressed = NULL;
+    size_t total_size = 0;
+
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+    strm.avail_in = 0;
+    strm.next_in = Z_NULL;
+
+    if (inflateInit2(&strm, 31) != Z_OK) {
+        return -1;
+    }
+
+    strm.avail_in = input_len;
+    strm.next_in = (unsigned char*)input;
+
+    do {
+        strm.avail_out = ZLIB_CHUNK_SIZE;
+        strm.next_out = (unsigned char*)out;
+
+        int ret = inflate(&strm, Z_NO_FLUSH);
+        if (ret != Z_OK && ret != Z_STREAM_END) {
+            inflateEnd(&strm);
+            free(decompressed);
+            return -1;
+        }
+
+        size_t have = ZLIB_CHUNK_SIZE - strm.avail_out;
+        char* new_decompressed = realloc(decompressed, total_size + have);
+        if (!new_decompressed) {
+            inflateEnd(&strm);
+            free(decompressed);
+            return -1;
+        }
+        decompressed = new_decompressed;
+        memcpy(decompressed + total_size, out, have);
+        total_size += have;
+    } while (strm.avail_out == 0);
+
+    inflateEnd(&strm);
+    *output = decompressed;
+    *output_len = total_size;
+    return 0;
+}
+
+// Save superpixels to compressed CSV
+static int superpixels_to_compressed_csv(char* path, Superpixel* superpixels, int num_superpixels) {
+    // First, write to memory
+    char* csv_data = NULL;
+    size_t csv_size = 0;
+    FILE* memfile = open_memstream(&csv_data, &csv_size);
+    if (!memfile) return -1;
+
+    // Write header
+    fprintf(memfile, "z,y,x,intensity,pixel_count\n");
+
+    // Write data
+    for (int i = 0; i < num_superpixels; i++) {
+        fprintf(memfile, "%.1f,%.1f,%.1f,%.1f,%u\n",
+                superpixels[i].z,
+                superpixels[i].y,
+                superpixels[i].x,
+                superpixels[i].c,
+                superpixels[i].n);
+    }
+
+    fclose(memfile);
+
+    // Compress the data
+    char* compressed_data;
+    size_t compressed_size;
+    if (compress_string(csv_data, csv_size, &compressed_data, &compressed_size) != 0) {
+        free(csv_data);
+        return -1;
+    }
+
+    // Write compressed data to file
+    FILE* fp = fopen(path, "wb");
+    if (!fp) {
+        free(csv_data);
+        free(compressed_data);
+        return -1;
+    }
+
+    size_t written = fwrite(compressed_data, 1, compressed_size, fp);
+    fclose(fp);
+
+    free(csv_data);
+    free(compressed_data);
+
+    return written == compressed_size ? 0 : -1;
+}
+
+// Load superpixels from compressed CSV
+static Superpixel* compressed_csv_to_superpixels(char* path, int* num_superpixels_out) {
+    // Read compressed file
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return NULL;
+
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    char* compressed_data = malloc(file_size);
+    if (!compressed_data) {
+        fclose(fp);
+        return NULL;
+    }
+
+    if (fread(compressed_data, 1, file_size, fp) != file_size) {
+        free(compressed_data);
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+
+    // Decompress data
+    char* csv_data;
+    size_t csv_size;
+    if (decompress_string(compressed_data, file_size, &csv_data, &csv_size) != 0) {
+        free(compressed_data);
+        return NULL;
+    }
+    free(compressed_data);
+
+    // Parse CSV from memory
+    char* line = csv_data;
+    char* end = csv_data + csv_size;
+    int num_lines = 0;
+
+    // Skip header
+    while (line < end && *line != '\n') line++;
+    line++; // Skip the newline
+
+    // Count lines
+    char* counting_line = line;
+    while (counting_line < end) {
+        if (*counting_line++ == '\n') num_lines++;
+    }
+
+    // Allocate array
+    Superpixel* superpixels = calloc(num_lines, sizeof(Superpixel));
+    if (!superpixels) {
+        free(csv_data);
+        return NULL;
+    }
+
+    // Read data
+    int i = 0;
+    while (line < end && i < num_lines) {
+        float z, y, x, c;
+        unsigned int n;
+
+        if (sscanf(line, "%f,%f,%f,%f,%u", &z, &y, &x, &c, &n) == 5) {
+            superpixels[i].z = z;
+            superpixels[i].y = y;
+            superpixels[i].x = x;
+            superpixels[i].c = c;
+            superpixels[i].n = n;
+            i++;
+        }
+
+        // Move to next line
+        while (line < end && *line != '\n') line++;
+        line++; // Skip the newline
+    }
+
+    free(csv_data);
+    *num_superpixels_out = num_lines;
+    return superpixels;
+}
+
 
 // Save superpixels to CSV
 static int superpixels_to_csv(char* path, Superpixel* superpixels, int num_superpixels) {
@@ -17,7 +243,7 @@ static int superpixels_to_csv(char* path, Superpixel* superpixels, int num_super
 
     // Write data
     for (int i = 0; i < num_superpixels; i++) {
-        fprintf(fp, "%f,%f,%f,%f,%u\n",
+        fprintf(fp, "%.1f,%.1f,%.1f,%.1f,%u\n",
                 superpixels[i].z,
                 superpixels[i].y,
                 superpixels[i].x,

@@ -11,6 +11,7 @@
 #define VESUVIUS_IMPL
 #include "vesuvius-c.h"
 
+#include "preprocess.h"
 #include "snic.h"
 #include "chord.h"
 #include "util.h"
@@ -26,6 +27,7 @@
 
 
 int scroll_1a_unwrap() {
+  constexpr f32 iso = 24.0f;
 
   constexpr int zmax = 14376;
   constexpr int ymax = 7888;
@@ -40,10 +42,9 @@ int scroll_1a_unwrap() {
   auto volume_metadata = vs_zarr_parse_zarray(SCROLL_1A_VOLUME_PATH "/.zarray");
   auto fiber_metadata = vs_zarr_parse_zarray(SCROLL_1A_FIBER_PATH "/.zarray");
 
-  printf("zmax%d\n",volume_metadata.shape[0]);
-  for (int z = 128; z < zmax-128; z+=dims[0]) {
-    for (int y = 128; y < ymax-128; y+=dims[1]) {
-      for (int x = 128; x < xmax-128; x+=dims[2]) {
+  for (int z = 2048; z < zmax-128; z+=dims[0]) {
+    for (int y = 2048; y < ymax-128; y+=dims[1]) {
+      for (int x = 2048; x < xmax-128; x+=dims[2]) {
         constexpr u32 max_superpixels = (dims[0]/d_seed)*(dims[1]/d_seed)*(dims[2]/d_seed) + 1;
         constexpr f32 bounds[NUM_DIMENSIONS][2] = {
           {0, (f32)dims[0]},
@@ -53,7 +54,7 @@ int scroll_1a_unwrap() {
 
         chunk* scrollchunk = nullptr;
         chunk* fiberchunk = nullptr;
-        uint32_t* labels = nullptr;
+        u32* labels = nullptr;
         Superpixel* superpixels = nullptr;
         SuperpixelConnections* connections = nullptr;
         Chord* chords = nullptr;
@@ -81,6 +82,15 @@ int scroll_1a_unwrap() {
           goto cleanup;
         }
 
+        float* cleaned_volume = segment_and_clean_f32(
+                    scrollchunk->data,
+                    dims[0], dims[1], dims[2],
+                    iso,
+                    iso + 128.0f);
+
+        memcpy(scrollchunk->data, cleaned_volume, dims[0] * dims[1] * dims[2] * sizeof(float));
+        free(cleaned_volume);
+
         auto fiberchunk_transposed = vs_transpose(fiberchunk,"zxy","zyx");
         vs_chunk_free(fiberchunk);
         fiberchunk = fiberchunk_transposed;
@@ -88,17 +98,16 @@ int scroll_1a_unwrap() {
 
         labels = malloc(dims[0]*dims[1]*dims[2]*sizeof(u32));
         superpixels = calloc(max_superpixels, sizeof(Superpixel));
-
         memset(labels, 0, dims[0]*dims[1]*dims[2]*sizeof(u32));
 
         neigh_overflow = snic(scrollchunk->data, labels, superpixels);
 
-        num_superpixels = filter_zero_superpixels(labels,superpixels);
+        num_superpixels = filter_superpixels(labels,superpixels,1,0.1f);
         printf("got %d superpixels from a possible %d\n",num_superpixels, snic_superpixel_count());
 
 
         snprintf(csvpath,1023,"%s/superpixels.%d.%d.%d.csv",OUTPUTPATH_1A,z/128,y/128,x/128);
-        superpixels_to_csv(csvpath,superpixels,snic_superpixel_count());
+        superpixels_to_csv(csvpath,superpixels,num_superpixels);
 
         connections = calculate_superpixel_connections(scrollchunk->data,labels);
 
@@ -110,7 +119,10 @@ int scroll_1a_unwrap() {
                       4096,
                       &num_chords);
 
-        free(chords);
+        snprintf(csvpath, 1023, "%s/chords.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
+        chords_to_csv(csvpath, chords, num_chords);
+
+        free_chords(chords,num_chords);
         free_superpixel_connections(connections, snic_superpixel_count());
         free(labels);
         free(superpixels);

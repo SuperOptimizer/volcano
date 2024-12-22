@@ -361,7 +361,7 @@ static SuperpixelConnections* calculate_superpixel_connections(
 #undef idx
 
 
-static int filter_zero_superpixels(u32* labels, Superpixel* superpixels) {
+static int filter_superpixels(u32* labels, Superpixel* superpixels, int min_size, f32 min_val) {
     constexpr int lz = dimension;
     constexpr int ly = dimension;
     constexpr int lx = dimension;
@@ -373,7 +373,7 @@ static int filter_zero_superpixels(u32* labels, Superpixel* superpixels) {
     u32* label_map = (u32*)calloc(snic_superpixel_count() + 1, sizeof(u32));
 
     for (u32 k = 1; k <= snic_superpixel_count(); k++) {
-        if (superpixels[k].n > 0 && superpixels[k].c > 0.0f) {
+        if (superpixels[k].n >= min_size && superpixels[k].c >= min_val) {
             new_count++;
             label_map[k] = new_count;
 

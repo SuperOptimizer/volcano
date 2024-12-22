@@ -15,8 +15,8 @@
 #define SMOOTHNESS_THRESHOLD 0.8f
 #define PROGRESS_THRESHOLD 0.5f
 #define MIN_CONNECTIONS 4
-#define KD_TREE_K 5
-#define KD_TREE_MAX_DIST 5.0f
+#define KD_TREE_K 8
+#define KD_TREE_MAX_DIST 8.0f
 #define MAX_RECORDS_PER_CELL 32
 
 #include "snic.h"
@@ -98,12 +98,69 @@ static int partition(float* arr, int low, int high) {
     return (i + 1);
 }
 
+// Iterative quicksort implementation to prevent stack overflow
 static void quicksort(float* arr, int low, int high) {
-    if (low < high) {
-        int pi = partition(arr, low, high);
-        quicksort(arr, low, pi - 1);
-        quicksort(arr, pi + 1, high);
+    // Create an auxiliary stack
+    int* stack = malloc(sizeof(int) * (high - low + 1));
+    int top = -1;
+
+    // Push initial values of low and high to stack
+    stack[++top] = low;
+    stack[++top] = high;
+
+    // Keep popping from stack while is not empty
+    while (top >= 0) {
+        // Pop high and low
+        high = stack[top--];
+        low = stack[top--];
+
+        // Get pivot element
+        int pivot = partition(arr, low, high);
+
+        // If there are elements on left side of pivot,
+        // then push left side to stack
+        if (pivot - 1 > low) {
+            stack[++top] = low;
+            stack[++top] = pivot - 1;
+        }
+
+        // If there are elements on right side of pivot,
+        // then push right side to stack
+        if (pivot + 1 < high) {
+            stack[++top] = pivot + 1;
+            stack[++top] = high;
+        }
     }
+
+    free(stack);
+}
+
+// Alternative approach using median-of-three partitioning if stack space is still an issue
+static float median_of_three(float* arr, int low, int high) {
+    int mid = low + (high - low) / 2;
+
+    // Sort low, mid, high values
+    if (arr[low] > arr[mid]) {
+        float temp = arr[low];
+        arr[low] = arr[mid];
+        arr[mid] = temp;
+    }
+    if (arr[mid] > arr[high]) {
+        float temp = arr[mid];
+        arr[mid] = arr[high];
+        arr[high] = temp;
+        if (arr[low] > arr[mid]) {
+            temp = arr[low];
+            arr[low] = arr[mid];
+            arr[mid] = temp;
+        }
+    }
+
+    // Put median at high-1
+    float temp = arr[mid];
+    arr[mid] = arr[high-1];
+    arr[high-1] = temp;
+    return arr[high-1];
 }
 
 // Calculate percentile value from array
@@ -139,7 +196,7 @@ static VolumeTracker* create_volume_tracker(float bounds[NUM_DIMENSIONS][2]) {
     tracker->num_records = 0;
 
     // Initialize spatial grid
-    tracker->cells_per_dim = 16;
+    tracker->cells_per_dim = 32;
     int total_cells = tracker->cells_per_dim * tracker->cells_per_dim * tracker->cells_per_dim;
     tracker->cells = calloc(total_cells, sizeof(SpatialCell));
 

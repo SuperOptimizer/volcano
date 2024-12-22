@@ -10,11 +10,13 @@ add_executable(volcano volcano.c)
 add_compile_options(-Wpedantic -g3 -ggdb -Wall -Wextra -Weverything )
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_compile_options(-O0)
-  add_compile_definitions(DEBUG)
+  target_compile_options(volcano PUBLIC -Og  -fno-omit-frame-pointer)
+  target_link_options(volcano PUBLIC  -fno-omit-frame-pointer)
+  target_compile_definitions(volcano PUBLIC DEBUG)
 else ()
-  add_compile_options(-Ofast -flto)
-  add_compile_definitions(NDEBUG)
+  target_compile_options(volcano PUBLIC -O2 -flto)
+  target_link_options(volcano PUBLIC )
+  target_compile_definitions(volcano PUBLIC NDEBUG)
 endif ()
 
 include_directories(third-party/villa/vesuvius-c)
@@ -55,3 +57,9 @@ if(JSONC_FOUND)
 else()
   message(FATAL_ERROR "json-c not found, please install json-c: https://github.com/json-c/json-c")
 endif()
+
+set(CMAKE_C_CLANG_TIDY
+        clang-tidy;
+        -checks=*,
+        -header-filter=.*
+)

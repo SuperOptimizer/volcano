@@ -26,7 +26,7 @@
 constexpr int zmax = 14376;
 constexpr int ymax = 7888;
 constexpr int xmax = 8096;
-constexpr f32 iso = 24.0f;
+constexpr f32 iso = 32.0f;
 constexpr int dims[3] = {dimension,dimension,dimension};
 constexpr u32 max_superpixels = snic_superpixel_count();
 constexpr f32 bounds[NUM_DIMENSIONS][2] = {
@@ -37,25 +37,28 @@ constexpr f32 bounds[NUM_DIMENSIONS][2] = {
 
 
 typedef struct WorkerArgs {
+  int worker_num;
   int z_start, z_end;
-  zarr_metadata volume_metadata;
-  zarr_metadata fiber_metadata;
 } WorkerArgs;
 
 void* worker_thread(void* arg) {
-  WorkerArgs* args = (WorkerArgs*)arg;
-  auto volume_metadata = args->volume_metadata;
-  auto fiber_metadata = args->fiber_metadata;
+  WorkerArgs* args = arg;
+
+  const auto volume_metadata = vs_zarr_parse_zarray(SCROLL_1A_VOLUME_PATH "/.zarray");
+  const auto fiber_metadata = vs_zarr_parse_zarray(SCROLL_1A_FIBER_PATH "/.zarray");
+
+  printf("worker %d start z %d end z %d\n",args->worker_num,args->z_start,args->z_end);
 
   for (int z = args->z_start; z < args->z_end; z += dims[0]) {
-    for (int y = 2048; y < 3072/*ymax*/; y += dims[1]) {
-      for (int x = 2048; x < 3072/*xmax*/; x += dims[2]) {
+    for (int y = 128; y < ymax - 128; y += dims[1]) {
+      for (int x = 128; x <  xmax - 128; x += dims[2]) {
         chunk* scrollchunk = nullptr;
         chunk* fiberchunk = nullptr;
         u32* labels = nullptr;
         Superpixel* superpixels = nullptr;
         SuperpixelConnections* connections = nullptr;
         Chord* chords = nullptr;
+        ChordStats* stats = nullptr;
 
         char chunkpath[1024] = {'\0'};
         char csvpath[1024] = {'\0'};
@@ -76,7 +79,7 @@ void* worker_thread(void* arg) {
         }
 
         if (vs_chunk_max(fiberchunk) < 0.5f) {
-          printf("no data in the fiber chunk so skipping %d %d %d\n",z,y,x);
+          //printf("no data in the fiber chunk so skipping %d %d %d\n",z,y,x);
           goto cleanup;
         }
 
@@ -105,8 +108,8 @@ void* worker_thread(void* arg) {
 
         neigh_overflow = snic(scrollchunk->data, labels, superpixels);
 
-        num_superpixels = filter_superpixels(labels,superpixels,1,0.1f);
-        printf("got %d superpixels from a possible %d\n",num_superpixels, snic_superpixel_count());
+        num_superpixels = filter_superpixels(labels,superpixels,1,iso);
+        //printf("worker %d got %d superpixels from a possible %d\n",args->worker_num,num_superpixels, snic_superpixel_count());
 
 
         snprintf(csvpath,1023,"%s/superpixels.%d.%d.%d.csv",OUTPUTPATH_1A,z/128,y/128,x/128);
@@ -124,19 +127,20 @@ void* worker_thread(void* arg) {
 
         snprintf(csvpath, 1023, "%s/chords.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
         chords_to_csv(csvpath, chords, num_chords);
-        ChordStats* stats = analyze_chords(chords, num_chords,superpixels,connections);
+        stats = analyze_chords(chords, num_chords,superpixels,connections);
         snprintf(csvpath, 1023, "%s/chords.stats.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
         write_chord_stats_csv(csvpath,stats,num_chords);
 
         snprintf(csvpath, 1023, "%s/chords.only.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
         chords_with_data_to_csv(csvpath,chords,num_chords,superpixels);
 
+        free(stats);
         free_chords(chords,num_chords);
         free_superpixel_connections(connections, num_superpixels);
         free(labels);
         free(superpixels);
 
-        printf("processed %d %d %d\n",z,y,x);
+        printf("worker %d processed %d %d %d\n",args->worker_num,z,y,x);
         cleanup:
 
         vs_chunk_free(fiberchunk);
@@ -144,15 +148,14 @@ void* worker_thread(void* arg) {
       }
     }
   }
+  printf("worker %d done\n",args->worker_num);
   return NULL;
 }
 
 int scroll_1a_unwrap() {
 
-  const auto volume_metadata = vs_zarr_parse_zarray(SCROLL_1A_VOLUME_PATH "/.zarray");
-  const auto fiber_metadata = vs_zarr_parse_zarray(SCROLL_1A_FIBER_PATH "/.zarray");
 
-  constexpr int num_threads = 8; // Or get from system
+  constexpr int num_threads = 8;
   constexpr int chunk_per_thread = ((zmax-128) - 2048) / (num_threads * dims[0]);
 
   pthread_t threads[num_threads];
@@ -160,19 +163,16 @@ int scroll_1a_unwrap() {
 
   for (int i = 0; i < num_threads; i++) {
     args[i] = (WorkerArgs){
+      .worker_num = i,
       .z_start = 2048 + i * chunk_per_thread * dims[0],
-      .z_end = i == num_threads-1 ? zmax-128 : 2048 + (i+1) * chunk_per_thread * dims[0],
-      .volume_metadata = volume_metadata,
-      .fiber_metadata = fiber_metadata,
+      .z_end = i == num_threads-1 ? zmax-128 : 2048 + (i+1) * chunk_per_thread * dims[0]
   };
-    pthread_create(&threads[i], NULL, worker_thread, &args[i]);
+    pthread_create(&threads[i], nullptr, worker_thread, &args[i]);
   }
 
   for (int i = 0; i < num_threads; i++) {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[i], nullptr);
   }
-
-
   return 0;
 }
 

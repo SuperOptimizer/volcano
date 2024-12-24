@@ -11,7 +11,7 @@
 #define MAX_CHORD_LENGTH 128
 #define NUM_DIMENSIONS 3
 #define MAX_RECENT_DIRS 3
-#define NUM_LAYERS 256
+#define NUM_LAYERS 32
 #define SMOOTHNESS_THRESHOLD 0.8f
 #define PROGRESS_THRESHOLD 0.5f
 #define MIN_CONNECTIONS 1
@@ -364,7 +364,7 @@ static int* select_start_points(const Superpixel* superpixels,
     for (int i = 0; i < num_superpixels; i++) {
         intensities[i] = superpixels[i].c;
     }
-    float min_intensity = calculate_percentile(intensities, num_superpixels, 5.0f);
+    float min_intensity = calculate_percentile(intensities, num_superpixels, 75.0f);
     free(intensities);
 
     int total_layer_points = 0;

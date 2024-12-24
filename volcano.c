@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 #include "volcano.h"
 
@@ -16,42 +17,39 @@
 #include "chord.h"
 #include "util.h"
 
+
 #define ROOTPATH "/Volumes/vesuvius"
 #define OUTPUTPATH_1A ROOTPATH "/output_1a"
 #define SCROLL_1A_VOLUME_PATH ROOTPATH "/dl.ash2txt.org/data/full-scrolls/Scroll1/PHercParis4.volpkg/volumes_zarr_standardized/54keV_7.91um_Scroll1A.zarr/0"
-#define SCROLL_1A_VOLUME_URL "https://dl.ash2txt.org/full-scrolls/Scroll1/PHercParis4.volpkg/volumes_zarr_standardized/54keV_7.91um_Scroll1A.zarr/0/"
 #define SCROLL_1A_FIBER_PATH ROOTPATH "/scroll1a_fibers/s1-surface-erode.zarr"
-#define SCROLL_1A_FIBER_URL "https://dl.ash2txt.org/community-uploads/bruniss/Fiber-and-Surface-Models/Predictions/s1/full-scroll-preds/s1-surface-erode.zarr/"
+
+constexpr int zmax = 14376;
+constexpr int ymax = 7888;
+constexpr int xmax = 8096;
+constexpr f32 iso = 24.0f;
+constexpr int dims[3] = {dimension,dimension,dimension};
+constexpr u32 max_superpixels = snic_superpixel_count();
+constexpr f32 bounds[NUM_DIMENSIONS][2] = {
+  {0, (f32)dims[0]},
+  {0, (f32)dims[1]},
+  {0, (f32)dims[2]}
+};
 
 
+typedef struct WorkerArgs {
+  int z_start, z_end;
+  zarr_metadata volume_metadata;
+  zarr_metadata fiber_metadata;
+} WorkerArgs;
 
+void* worker_thread(void* arg) {
+  WorkerArgs* args = (WorkerArgs*)arg;
+  auto volume_metadata = args->volume_metadata;
+  auto fiber_metadata = args->fiber_metadata;
 
-int scroll_1a_unwrap() {
-  constexpr f32 iso = 24.0f;
-
-  constexpr int zmax = 14376;
-  constexpr int ymax = 7888;
-  constexpr int xmax = 8096;
-
-  //constexpr int zmax = 1024;
-  //constexpr int ymax = 1024;
-  //constexpr int xmax = 1024;
-
-  constexpr int dims[3] = {dimension,dimension,dimension};
-
-  auto volume_metadata = vs_zarr_parse_zarray(SCROLL_1A_VOLUME_PATH "/.zarray");
-  auto fiber_metadata = vs_zarr_parse_zarray(SCROLL_1A_FIBER_PATH "/.zarray");
-
-  for (int z = 2048; z < zmax-128; z+=dims[0]) {
-    for (int y = 2048; y < ymax-128; y+=dims[1]) {
-      for (int x = 2048; x < xmax-128; x+=dims[2]) {
-        constexpr u32 max_superpixels = (dims[0]/d_seed)*(dims[1]/d_seed)*(dims[2]/d_seed);
-        constexpr f32 bounds[NUM_DIMENSIONS][2] = {
-          {0, (f32)dims[0]},
-          {0, (f32)dims[1]},
-          {0, (f32)dims[2]}
-        };
-
+  for (int z = args->z_start; z < args->z_end; z += dims[0]) {
+    for (int y = 2048; y < 3072/*ymax*/; y += dims[1]) {
+      for (int x = 2048; x < 3072/*xmax*/; x += dims[2]) {
         chunk* scrollchunk = nullptr;
         chunk* fiberchunk = nullptr;
         u32* labels = nullptr;
@@ -114,21 +112,27 @@ int scroll_1a_unwrap() {
         snprintf(csvpath,1023,"%s/superpixels.%d.%d.%d.csv",OUTPUTPATH_1A,z/128,y/128,x/128);
         superpixels_to_csv(csvpath,superpixels,num_superpixels);
 
-        connections = calculate_superpixel_connections(scrollchunk->data,labels);
+        connections = calculate_superpixel_connections(scrollchunk->data,labels,num_superpixels);
 
         chords = grow_chords(superpixels,
                       connections,
                       num_superpixels,
                       bounds,
                       0,          // 0 for z-axis, 1 for y-axis, 2 for x-axis
-                      8192,
+                      4096,
                       &num_chords);
 
         snprintf(csvpath, 1023, "%s/chords.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
         chords_to_csv(csvpath, chords, num_chords);
+        ChordStats* stats = analyze_chords(chords, num_chords,superpixels,connections);
+        snprintf(csvpath, 1023, "%s/chords.stats.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
+        write_chord_stats_csv(csvpath,stats,num_chords);
+
+        snprintf(csvpath, 1023, "%s/chords.only.%d.%d.%d.csv", OUTPUTPATH_1A, z/128, y/128, x/128);
+        chords_with_data_to_csv(csvpath,chords,num_chords,superpixels);
 
         free_chords(chords,num_chords);
-        free_superpixel_connections(connections, snic_superpixel_count());
+        free_superpixel_connections(connections, num_superpixels);
         free(labels);
         free(superpixels);
 
@@ -139,6 +143,33 @@ int scroll_1a_unwrap() {
         vs_chunk_free(scrollchunk);
       }
     }
+  }
+  return NULL;
+}
+
+int scroll_1a_unwrap() {
+
+  const auto volume_metadata = vs_zarr_parse_zarray(SCROLL_1A_VOLUME_PATH "/.zarray");
+  const auto fiber_metadata = vs_zarr_parse_zarray(SCROLL_1A_FIBER_PATH "/.zarray");
+
+  constexpr int num_threads = 8; // Or get from system
+  constexpr int chunk_per_thread = ((zmax-128) - 2048) / (num_threads * dims[0]);
+
+  pthread_t threads[num_threads];
+  WorkerArgs args[num_threads];
+
+  for (int i = 0; i < num_threads; i++) {
+    args[i] = (WorkerArgs){
+      .z_start = 2048 + i * chunk_per_thread * dims[0],
+      .z_end = i == num_threads-1 ? zmax-128 : 2048 + (i+1) * chunk_per_thread * dims[0],
+      .volume_metadata = volume_metadata,
+      .fiber_metadata = fiber_metadata,
+  };
+    pthread_create(&threads[i], NULL, worker_thread, &args[i]);
+  }
+
+  for (int i = 0; i < num_threads; i++) {
+    pthread_join(threads[i], NULL);
   }
 
 

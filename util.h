@@ -390,3 +390,112 @@ static Chord* csv_to_chords(char* path, int* num_chords_out) {
     *num_chords_out = num_lines;
     return chords;
 }
+
+// Write chords with full superpixel data to CSV
+static int chords_with_data_to_csv(const char* path,
+                                  const Chord* chords,
+                                  int num_chords,
+                                  const Superpixel* superpixels) {
+    FILE* fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    // Write header with all fields
+    fprintf(fp, "chord_id,superpixel_id,z,y,x,intensity,pixel_count\n");
+
+    // Write data - each line contains full information about each point in the chord
+    for (int i = 0; i < num_chords; i++) {
+        const Chord* chord = &chords[i];
+
+        for (int j = 0; j < chord->point_count; j++) {
+            uint32_t superpixel_id = chord->points[j];
+            const Superpixel* sp = &superpixels[superpixel_id];
+
+            // Write: chord_id, point_index, superpixel_id, superpixel data (z,y,x,intensity,count), position data
+            fprintf(fp, "%d,%u,%.1f,%.1f,%.1f,%.1f,%u\n",
+                    i,                    // chord_id
+                    superpixel_id,        // original superpixel id
+                    sp->z,                // superpixel centroid z
+                    sp->y,                // superpixel centroid y
+                    sp->x,                // superpixel centroid x
+                    sp->c,                // intensity
+                    sp->n                // pixel count
+            );
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+
+// Read chords with full data from CSV
+static Chord* csv_to_chords_with_data(const char* path, int* num_chords_out) {
+    FILE* fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    char line[1024];
+    int max_chords = 1024; // Initial capacity
+    Chord* chords = calloc(max_chords, sizeof(Chord));
+    if (!chords) {
+        fclose(fp);
+        return NULL;
+    }
+
+    // Skip header
+    fgets(line, sizeof(line), fp);
+
+    int current_chord_id = -1;
+    int num_chords = 0;
+    Chord* current_chord = NULL;
+    int point_capacity = 0;
+
+    // Read data line by line
+    while (fgets(line, sizeof(line), fp)) {
+        int chord_id;
+        uint32_t superpixel_id;
+        float sp_z, sp_y, sp_x, intensity;
+        unsigned int pixel_count;
+
+        if (sscanf(line, "%d,%u,%f,%f,%f,%f,%u",
+                   &chord_id, &superpixel_id,
+                   &sp_z, &sp_y, &sp_x, &intensity, &pixel_count) != 8) {
+            continue;
+        }
+
+        // If this is a new chord
+        if (chord_id != current_chord_id) {
+            current_chord_id = chord_id;
+
+            // Expand chords array if needed
+            if (chord_id >= max_chords) {
+                int new_max = max_chords * 2;
+                Chord* new_chords = realloc(chords, new_max * sizeof(Chord));
+                if (!new_chords) {
+                    for (int i = 0; i < num_chords; i++) {
+                        free(chords[i].points);
+                        free(chords[i].recent_dirs);
+                    }
+                    free(chords);
+                    fclose(fp);
+                    return NULL;
+                }
+                chords = new_chords;
+                max_chords = new_max;
+            }
+
+            current_chord = &chords[chord_id];
+            point_capacity = 128; // Initial point capacity
+            current_chord->points = malloc(point_capacity * sizeof(uint32_t));
+            current_chord->recent_dirs = malloc(MAX_RECENT_DIRS * NUM_DIMENSIONS * sizeof(float));
+            current_chord->point_count = 0;
+            current_chord->num_recent_dirs = 0;
+
+            if (chord_id >= num_chords) {
+                num_chords = chord_id + 1;
+            }
+        }
+    }
+
+    fclose(fp);
+    *num_chords_out = num_chords;
+    return chords;
+}

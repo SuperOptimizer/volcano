@@ -1,33 +1,5 @@
 #pragma once
 
-// This comes from https://github.com/spelufo/stabia/tree/main
-// licensed under the MIT license
-// Modified by VerditeLabs
-
-/*
-MIT License
-
-Copyright (c) 2023 Santiago Pelufo
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
-
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -35,17 +7,9 @@ SOFTWARE.
 #include <stdint.h>
 #include <time.h>
 
-constexpr f32 compactness = 1.0f;
+constexpr f32 compactness = 1024.0f;
 constexpr int d_seed = 2;
 constexpr int dimension = 128;
-
-
-// HEAP ////////////////////////////////////////////////////////////////////////
-
-// The only part of this Heap implementation specific to SNIC are the HeapNode
-// and heap_node_val definitions. The heap_node_val is the heap value i.e. the
-// priority, and it is the SNIC distance negated, because this is a max-heap
-// and the SNIC algorithm wants a min-heap.
 
 typedef struct HeapNode {
   f32 d;
@@ -79,8 +43,6 @@ static inline void heap_free(Heap *heap) {
 }
 
 static inline void heap_push(Heap *heap, HeapNode node) {
-  //assert(heap->len <= heap->size);
-
   heap->len++;
   heap->nodes[heap->len] = node;
   for (int i = heap->len, j = 0; i > 1; i = j) {
@@ -90,8 +52,6 @@ static inline void heap_push(Heap *heap, HeapNode node) {
 }
 
 static inline HeapNode heap_pop(Heap *heap) {
-  //assert(heap->len > 0);
-
   HeapNode node = heap->nodes[1];
   heap->len--;
   heap->nodes[1] = heap->nodes[heap->len+1];
@@ -104,39 +64,20 @@ static inline HeapNode heap_pop(Heap *heap) {
     j = l;
     if (r <= heap->len && heap_node_val(heap->nodes[l]) < heap_node_val(heap->nodes[r])) {
       j = r;
-    } else {
     }
     heap_fix_edge(heap, i, j) else break;
   }
-
   return node;
 }
 
-#undef heap_left
-#undef heap_right
-#undef heap_parent
-#undef heap_fix_edge
-
-
-// SNIC ////////////////////////////////////////////////////////////////////////
-
-// This is based on the paper and the code from:
-// - https://www.epfl.ch/labs/ivrl/research/snic-superpixels/
-// - https://github.com/achanta/SNIC/
-
-// There isn't a theoretical maximum for SNIC neighbors. The neighbors of a cube
-// would be 26, so if compactness is high we shouldn't exceed that by too much.
-// 56 results in sizeof(Superpixel) == 4*8*8 (4 64B cachelines).
 #define SUPERPIXEL_MAX_NEIGHS (56)
 typedef struct Superpixel {
   f32 z, y, x, c;
   u32 n;
 } Superpixel;
 
-
 #define snic_superpixel_count() ((dimension/2)*(dimension/2)*(dimension/2))
 
-// The labels must be the same size as img, and all zeros.
 static int snic(f32 *img, u32 *labels, Superpixel* superpixels) {
   constexpr int lz = dimension;
   constexpr int ly = dimension;
@@ -144,46 +85,48 @@ static int snic(f32 *img, u32 *labels, Superpixel* superpixels) {
   constexpr int lylx = ly * lx;
   constexpr int img_size = lylx * lz;
 
+  // Initialize all labels to UINT32_MAX (uninitialized)
+  for (int i = 0; i < img_size; i++) {
+    labels[i] = UINT32_MAX;
+  }
+
   constexpr f32 invwt = (compactness*compactness*snic_superpixel_count())/(f32)(img_size);
-
-
 
   #define idx(z, y, x) ((z)*lylx + (x)*ly + (y))
   #define sqr(x) ((x)*(x))
 
-  int neigh_overflow = 0; // Number of neighbors that couldn't be added.
-
+  int neigh_overflow = 0;
   Heap pq = heap_alloc(img_size);
   u32 numk = 0;
+
   for (u8 z = 0; z < lz; z += d_seed) {
     for (u8 y = 0; y < ly; y += d_seed) {
       for (u8 x = 0; x < lx; x += d_seed) {
-        numk++;
         heap_push(&pq, (HeapNode){.d = 0.0f, .k = numk, .x = x, .y = y, .z = z});
+        numk++;
       }
     }
   }
 
-
   while (pq.len > 0) {
     HeapNode n = heap_pop(&pq);
     int i = idx(n.z, n.y, n.x);
-    if (labels[i] > 0) continue;
+    if (labels[i] != UINT32_MAX) continue;
 
     u32 k = n.k;
     labels[i] = k;
-    superpixels[k].c += img[i];
+    int c = img[i];
+    superpixels[k].c += c;
     superpixels[k].x += n.x;
     superpixels[k].y += n.y;
     superpixels[k].z += n.z;
     superpixels[k].n += 1;
 
-
     #define do_neigh(ndz, ndy, ndx, ioffset) { \
       int xx = n.x + ndx; int yy = n.y + ndy; int zz = n.z + ndz; \
       if (0 <= xx && xx < lx && 0 <= yy && yy < ly && 0 <= zz && zz < lz) { \
         int ii = i + ioffset; \
-        if (labels[ii] <= 0) { \
+        if (labels[ii] == UINT32_MAX) { \
           f32 ksize = (f32)superpixels[k].n; \
           f32 dc = sqr(255.0f*(superpixels[k].c - (img[ii]*ksize))); \
           f32 dx = superpixels[k].x - xx*ksize; \
@@ -202,10 +145,9 @@ static int snic(f32 *img, u32 *labels, Superpixel* superpixels) {
     do_neigh( 0,  0, -1,   -ly);
     do_neigh( 1,  0,  0,  lylx);
     do_neigh(-1,  0,  0, -lylx);
-    #undef do_neigh
   }
 
-  for (u32 k = 1; k <= snic_superpixel_count(); k++) {
+  for (u32 k = 0; k < snic_superpixel_count(); k++) {
     f32 ksize = (f32)superpixels[k].n;
     superpixels[k].c /= ksize;
     superpixels[k].x /= ksize;
@@ -217,22 +159,22 @@ static int snic(f32 *img, u32 *labels, Superpixel* superpixels) {
   return neigh_overflow;
 }
 
-
 typedef struct SuperpixelConnection {
-    u32 neighbor_label;  // The label of the neighboring superpixel
-    f32 connection_strength;  // Sum of values at the boundary
+    u32 neighbor_label;
+    f32 connection_strength;
 } SuperpixelConnection;
 
 typedef struct SuperpixelConnections {
-    SuperpixelConnection* connections;  // Array of connections for this superpixel
-    int num_connections;  // Number of connections found
+    SuperpixelConnection* connections;
+    int num_connections;
 } SuperpixelConnections;
 
 static void free_superpixel_connections(SuperpixelConnections* connections, u32 num_superpixels) {
     if (!connections) return;
-    for (u32 i = 1; i <= num_superpixels; i++) {
-        if (connections[i].connections) {
-            free(connections[i].connections);
+    for (u32 i = 0; i < num_superpixels; i++) {
+        SuperpixelConnection* conns = connections[i].connections;
+        if (conns) {
+            free(conns);
         }
     }
     free(connections);
@@ -240,21 +182,23 @@ static void free_superpixel_connections(SuperpixelConnections* connections, u32 
 
 static SuperpixelConnections* calculate_superpixel_connections(
     const f32* img,
-    const u32* labels
+    const u32* labels,
+    int num_superpixels
 ) {
     constexpr int lz = dimension;
     constexpr int ly = dimension;
     constexpr int lx = dimension;
     constexpr int lylx = ly * lx;
 
-    SuperpixelConnections* all_connections = calloc(snic_superpixel_count() + 1, sizeof(SuperpixelConnections));
+    SuperpixelConnections* all_connections = calloc(num_superpixels, sizeof(SuperpixelConnections));
+    if (!all_connections) return NULL;
 
     // First pass: count unique neighbors
     for (int z = 0; z < lz; z++) {
         for (int y = 0; y < ly; y++) {
             for (int x = 0; x < lx; x++) {
                 u32 current_label = labels[idx(z,y,x)];
-                if (current_label == 0) continue;
+                if (current_label == UINT32_MAX) continue;
 
                 for (int dz = -1; dz <= 1; dz++) {
                     for (int dy = -1; dy <= 1; dy++) {
@@ -269,15 +213,16 @@ static SuperpixelConnections* calculate_superpixel_connections(
                                 continue;
 
                             u32 neighbor_label = labels[idx(zz,yy,xx)];
-                            if (neighbor_label == 0 || neighbor_label == current_label)
+                            if (neighbor_label == UINT32_MAX || neighbor_label == current_label)
                                 continue;
 
                             bool found = false;
-                            for (int i = 0; i < all_connections[current_label].num_connections; i++) {
-                                if (all_connections[current_label].connections &&
-                                    all_connections[current_label].connections[i].neighbor_label == neighbor_label) {
-                                    found = true;
-                                    break;
+                            if (all_connections[current_label].connections) {
+                                for (int i = 0; i < all_connections[current_label].num_connections; i++) {
+                                    if (all_connections[current_label].connections[i].neighbor_label == neighbor_label) {
+                                        found = true;
+                                        break;
+                                    }
                                 }
                             }
                             if (!found) {
@@ -291,25 +236,20 @@ static SuperpixelConnections* calculate_superpixel_connections(
     }
 
     // Allocate connection arrays
-    for (u32 i = 1; i <= snic_superpixel_count(); i++) {
+    for (u32 i = 0; i < num_superpixels; i++) {
         if (all_connections[i].num_connections > 0) {
-            all_connections[i].connections = (SuperpixelConnection*)calloc(
+            all_connections[i].connections = calloc(
                 all_connections[i].num_connections, sizeof(SuperpixelConnection));
-
-            // Initialize connections
-            for (int j = 0; j < all_connections[i].num_connections; j++) {
-                all_connections[i].connections[j].connection_strength = 0.0f;
-            }
             all_connections[i].num_connections = 0;  // Reset for second pass
         }
     }
 
-    // Second pass: calculate connections with running totals
+    // Second pass: calculate connections
     for (int z = 0; z < lz; z++) {
         for (int y = 0; y < ly; y++) {
             for (int x = 0; x < lx; x++) {
                 u32 current_label = labels[idx(z,y,x)];
-                if (current_label == 0) continue;
+                if (current_label == UINT32_MAX) continue;
                 float current_val = img[idx(z,y,x)];
 
                 for (int dz = -1; dz <= 1; dz++) {
@@ -325,13 +265,12 @@ static SuperpixelConnections* calculate_superpixel_connections(
                                 continue;
 
                             u32 neighbor_label = labels[idx(zz,yy,xx)];
-                            if (neighbor_label == 0 || neighbor_label == current_label)
+                            if (neighbor_label == UINT32_MAX || neighbor_label == current_label)
                                 continue;
 
                             float neighbor_val = img[idx(zz,yy,xx)];
                             float value_similarity = 1.0f - fabsf(current_val - neighbor_val) / 255.0f;
 
-                            // Find or create connection entry
                             int conn_idx = -1;
                             for (int i = 0; i < all_connections[current_label].num_connections; i++) {
                                 if (all_connections[current_label].connections[i].neighbor_label == neighbor_label) {
@@ -356,11 +295,6 @@ static SuperpixelConnections* calculate_superpixel_connections(
     return all_connections;
 }
 
-
-#undef sqr
-#undef idx
-
-
 static int filter_superpixels(u32* labels, Superpixel* superpixels, int min_size, f32 min_val) {
     constexpr int lz = dimension;
     constexpr int ly = dimension;
@@ -368,30 +302,23 @@ static int filter_superpixels(u32* labels, Superpixel* superpixels, int min_size
     constexpr int lylx = ly * lx;
     constexpr int img_size = lylx * lz;
 
-    // First pass: create mapping for new labels
     int new_count = 0;
-    u32* label_map = (u32*)calloc(snic_superpixel_count() + 1, sizeof(u32));
+    u32* label_map = calloc(snic_superpixel_count(), sizeof(u32));
 
-    for (u32 k = 1; k <= snic_superpixel_count(); k++) {
+    for (u32 k = 0; k < snic_superpixel_count(); k++) {
         if (superpixels[k].n >= min_size && superpixels[k].c >= min_val) {
-            new_count++;
             label_map[k] = new_count;
-
-            // Move superpixel to its new position if needed
             if (new_count != k) {
                 superpixels[new_count] = superpixels[k];
             }
+            new_count++;
+        } else {
+            label_map[k] = UINT32_MAX;
         }
     }
 
-    // Clear any remaining superpixels
-    for (u32 k = new_count + 1; k <= snic_superpixel_count(); k++) {
-        superpixels[k] = (Superpixel){0};
-    }
-
-    // Second pass: update labels array
     for (int i = 0; i < img_size; i++) {
-        if (labels[i] > 0) {
+        if (labels[i] != UINT32_MAX) {
             labels[i] = label_map[labels[i]];
         }
     }
@@ -399,3 +326,6 @@ static int filter_superpixels(u32* labels, Superpixel* superpixels, int min_size
     free(label_map);
     return new_count;
 }
+
+#undef sqr
+#undef idx

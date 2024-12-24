@@ -89,7 +89,7 @@ class VolumeViewer(QMainWindow):
         self.glyph3D.SetSourceConnection(self.sphere.GetOutputPort())
         self.glyph3D.SetInputData(self.polydata)
         self.glyph3D.SetScaleModeToScaleByScalar()
-        self.glyph3D.SetScaleFactor(1.0 * self.d_seed)
+        self.glyph3D.SetScaleFactor(2.0 * self.d_seed)
 
     def setup_visualization(self):
         self.renderer = vtk.vtkRenderer()
@@ -279,13 +279,7 @@ def load_and_visualize_superpixels(csv_path: str, d_seed: float = 1.0):
 def load_and_visualize_chords(superpixels_csv: str, chords_csv: str, d_seed: float = 1.0):
     """
     Load chords and their superpixels from CSV files and visualize using VTK.
-
-    Args:
-        superpixels_csv: Path to the superpixels CSV file containing positions
-        chords_csv: Path to the chords CSV file
-        d_seed: Seed diameter for visualization (controls sphere size)
     """
-    # Load superpixels for positions and intensities
     try:
         superpixels_df = pd.read_csv(superpixels_csv)
 
@@ -298,23 +292,27 @@ def load_and_visualize_chords(superpixels_csv: str, chords_csv: str, d_seed: flo
         print(f"Error reading CSV files: {e}")
         return
 
-    # Create list of all superpixel indices and their positions that are in chords
-    all_indices = []
+    # Create list of all superpixel indices (still 1-based at this point)
+    all_indices_1based = []
     for chord in chords:
-        all_indices.extend(chord)
-    all_indices = sorted(set(all_indices))  # Remove duplicates
+        all_indices_1based.extend(chord)
+    all_indices_1based = sorted(set(all_indices_1based))
+
+    # Create the mapping while indices are still 1-based
+    superpixel_to_chord = {idx: chord_num for chord_num, chord in enumerate(chords) for idx in chord}
+
+    # Convert to 0-based indices after creating the mapping
+    all_indices = [i-1 for i in all_indices_1based]
 
     # Get positions and intensities for superpixels in chords
     positions = superpixels_df.iloc[all_indices][['z', 'y', 'x']].values
     intensities = superpixels_df.iloc[all_indices]['intensity'].values
 
-    # Create a mapping from superpixel index to chord number
-    superpixel_to_chord = {idx: chord_num for chord_num, chord in enumerate(chords) for idx in chord}
-
-    # Create colors based on chord membership
+    # Create colors based on chord membership - use 1-based indices for lookup
     colors = np.zeros((len(all_indices), 4))
-    for i, idx in enumerate(all_indices):
-        chord_num = superpixel_to_chord[idx]
+    for i, idx_0based in enumerate(all_indices):
+        idx_1based = idx_0based + 1  # Convert back to 1-based for the lookup
+        chord_num = superpixel_to_chord[idx_1based]
         colors[i] = plt.cm.viridis(chord_num % 256 / 255.0)
 
     # Convert to RGB 0-255 range

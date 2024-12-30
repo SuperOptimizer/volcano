@@ -134,7 +134,6 @@ static void quicksort(float* arr, int low, int high) {
     free(stack);
 }
 
-// Alternative approach using median-of-three partitioning if stack space is still an issue
 static float median_of_three(float* arr, int low, int high) {
     int mid = low + (high - low) / 2;
 

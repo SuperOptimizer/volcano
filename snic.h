@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <time.h>
 
-constexpr f32 compactness = 1024.0f;
+constexpr f32 compactness = 512.0f;
 constexpr int d_seed = 2;
 constexpr int dimension = 128;
 

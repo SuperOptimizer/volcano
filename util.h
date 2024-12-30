@@ -499,3 +499,9 @@ static Chord* csv_to_chords_with_data(const char* path, int* num_chords_out) {
     *num_chords_out = num_chords;
     return chords;
 }
+
+static bool file_exists(char* path) {
+    struct stat path_stat;
+
+    return stat(path, &path_stat) == 0;
+}

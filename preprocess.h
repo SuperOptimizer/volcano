@@ -97,7 +97,6 @@ void flood_fill_f32(const float* volume, uint8_t* mask, uint8_t* visited,
     free(queue_x);
 }
 
-// Main segmentation function for float32 volume data
 float* segment_and_clean_f32(const float* volume, int depth, int height, int width,
                            float iso_threshold, float start_threshold) {
     int total_size = depth * height * width;

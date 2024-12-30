@@ -333,8 +333,8 @@ def load_and_visualize_chords(superpixels_csv: str, chords_csv: str, d_seed: flo
     )
 
 if __name__ == "__main__":
-    superpixels_csv = "/Volumes/vesuvius/output_1a/superpixels.16.16.16.csv"
-    chords_csv = "/Volumes/vesuvius/output_1a/chords.16.16.16.csv"
+    superpixels_csv = "/Volumes/vesuvius/output_1a/superpixels.19.19.19.csv"
+    chords_csv = "/Volumes/vesuvius/output_1a/chords.19.19.19.csv"
 
     # Visualize just superpixels
     # load_and_visualize_superpixels(superpixels_csv)
